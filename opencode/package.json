@@ -1,0 +1,14 @@
+{
+  "name": "@tim0-12432/opencode-traffic-lights/opencode",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "tsc": "tsc --noEmit"
+  },
+  "type": "module",
+  "devDependencies": {
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.32",
+    "@opencode-ai/sdk": "1.18.32"
+  }
+}

@@ -1,0 +1,6 @@
+2026-09-26T21:12:57.408Z DEBUG RegistrationParameters: port=28196
+2026-09-26T21:12:57.410Z DEBUG RegistrationParameters: pluginUUID=e8515e4bebf89510082523bc25239869
+2026-09-26T21:12:57.410Z DEBUG RegistrationParameters: registerEvent=registerPlugin
+2026-09-26T21:12:57.411Z DEBUG RegistrationParameters: info={"application":{"font":"Segoe UI","language":"de","platform":"windows","platformVersion":"10.0.26200","version":"7.1.0.22321"},"colors":{"buttonMouseOverBackgroundColor":"#464646FF","buttonPressedBackgroundColor":"#303030FF","buttonPressedBorderColor":"#646464FF","buttonPressedTextColor":"#969696FF","highlightColor":"#0078FFFF"},"devicePixelRatio":1,"devices":[{"id":"9d8304d331fbb3251a402a7f1960fb97","name":"Stream Deck Mini","size":{"columns":3,"rows":2},"type":1},{"id":"5b92b9e76d42be28d912c3f9cae9e9cc","name":"Virtual Stream Deck","size":{"columns":5,"rows":4},"type":11}],"plugin":{"uuid":"com.tim0-12432.opencode-traffic-lights","version":"0.1.0.0"}}
+2026-09-26T21:12:57.428Z TRACE Connection: {"device":"9d8304d331fbb3251a402a7f1960fb97","deviceInfo":{"name":"Stream Deck Mini","size":{"columns":3,"rows":2},"type":1},"event":"deviceDidConnect"}
+2026-09-26T21:12:57.429Z TRACE Connection: {"device":"5b92b9e76d42be28d912c3f9cae9e9cc","deviceInfo":{"name":"Virtual Stream Deck","size":{"columns":5,"rows":4},"type":11},"event":"deviceDidConnect"}

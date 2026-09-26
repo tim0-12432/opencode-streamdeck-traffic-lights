@@ -1,0 +1,46 @@
+{
+	"Name": "Opencode-Traffic-Lights",
+	"Version": "0.1.0.0",
+	"Author": "tim0-12432",
+	"Actions": [
+		{
+			"Name": "OpenCode Status",
+			"UUID": "com.tim0-12432.opencode-traffic-lights.status",
+			"Icon": "imgs/actions/counter/icon",
+			"Tooltip": "Displays the status of your opencode terminal session.",
+			"PropertyInspectorPath": "ui/status.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/actions/counter/key"
+				}
+			]
+		}
+	],
+	"Category": "Opencode-Traffic-Lights",
+	"CategoryIcon": "imgs/plugin/category-icon",
+	"CodePath": "bin/plugin.js",
+	"Description": "Displays icons depending on the state of your opencode terminal session.",
+	"Icon": "imgs/plugin/marketplace",
+	"SDKVersion": 3,
+	"Software": {
+		"MinimumVersion": "7.1"
+	},
+	"OS": [
+		{
+			"Platform": "mac",
+			"MinimumVersion": "12"
+		},
+		{
+			"Platform": "windows",
+			"MinimumVersion": "10"
+		}
+	],
+	"Nodejs": {
+		"Version": "24",
+		"Debug": "enabled"
+	},
+	"UUID": "com.tim0-12432.opencode-traffic-lights"
+}

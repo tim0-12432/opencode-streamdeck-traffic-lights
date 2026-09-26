@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 13px sans-serif; padding: 12px; color: #ddd; }
+    label { display: block; margin: 12px 0 4px; }
+    input, select { width: 100%; box-sizing: border-box; }
+    small { display: block; margin-top: 4px; opacity: .75; }
+  </style>
+</head>
+<body>
+  <label for="instance">OpenCode instance ID</label>
+  <input id="instance" type="number" min="0" step="1" value="1">
+
+  <label for="greenImage">Green image</label>
+  <input id="greenImage" type="file" accept="image/png,image/jpeg,image/webp">
+  <small>Leave empty to use the built-in green circle.</small>
+
+  <label for="yellowImage">Yellow image</label>
+  <input id="yellowImage" type="file" accept="image/png,image/jpeg,image/webp">
+
+  <label for="redImage">Red image</label>
+  <input id="redImage" type="file" accept="image/png,image/jpeg,image/webp">
+
+  <label for="tapMode">On tap</label>
+  <select id="tapMode">
+    <option value="none">Do nothing</option>
+    <option value="url">Open HTTP(S) URL</option>
+    <option value="program">Run program or script</option>
+  </select>
+
+  <label for="tapUrl">URL</label>
+  <input id="tapUrl" placeholder="https://example.com">
+
+  <label for="program">Program / script path</label>
+  <input id="program" placeholder="/absolute/path/to/script">
+
+  <label for="arguments">Arguments (JSON array)</label>
+  <input id="arguments" placeholder='["--instance","2"]'>
+  <small>Use an absolute program path. Arguments are not executed through a shell.</small>
+
+  <script>
+    let socket;
+    let action;
+    let context;
+    let settings = {};
+    let ready = false;
+
+    function sendSettings() {
+      if (!ready || socket?.readyState !== WebSocket.OPEN) return;
+
+      socket.send(JSON.stringify({
+        event: "setSettings",
+        action,
+        context,
+        payload: settings
+      }));
+    }
+
+    window.connectElgatoStreamDeckSocket = function (
+      port, uuid, registerEvent, info, actionInfo
+    ) {
+      const details = JSON.parse(actionInfo);
+      action = details.action;
+      context = uuid;
+      settings = details.payload?.settings || {};
+
+      socket = new WebSocket(`ws://127.0.0.1:${port}`);
+
+      socket.onopen = function () {
+        socket.send(JSON.stringify({
+          event: registerEvent,
+          uuid
+        }));
+        ready = true;
+      };
+
+      socket.onmessage = function (message) {
+        const incoming = JSON.parse(message.data);
+        if (incoming.event === "didReceiveSettings") {
+          settings = incoming.payload.settings || {};
+          render();
+        }
+      };
+
+      render();
+    };
+
+    function render() {
+      document.getElementById("instance").value = settings.instance ?? 1;
+      document.getElementById("tapMode").value = settings.tapMode || "none";
+      document.getElementById("tapUrl").value = settings.tapUrl || "";
+      document.getElementById("program").value = settings.program || "";
+      document.getElementById("arguments").value = settings.arguments || "[]";
+    }
+
+    for (const name of ["tapMode", "tapUrl", "program", "arguments"]) {
+      document.getElementById(name).addEventListener("change", (event) => {
+        settings[name] = event.target.value;
+        sendSettings();
+      });
+    }
+
+    document.getElementById("instance").addEventListener("change", (event) => {
+      const value = Number(event.target.value);
+      if (!Number.isSafeInteger(value) || value < 0) return;
+      settings.instance = value;
+      sendSettings();
+    });
+
+    for (const name of ["greenImage", "yellowImage", "redImage"]) {
+      document.getElementById(name).addEventListener("change", async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        if (file.size > 100_000) {
+          alert("Please choose an image under 100 KB.");
+          event.target.value = "";
+          return;
+        }
+
+        settings[name] = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        sendSettings();
+      });
+    }
+  </script>
+</body>
+</html>
