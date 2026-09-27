@@ -1,20 +1,30 @@
 {
-    "name": "@tim0-12432/opencode-traffic-lights/streamdeck",
-    "scripts": {
-        "build": "rollup -c",
-        "watch": "rollup -c -w --watch.onEnd=\"streamdeck restart com.tim0-12432.opencode-traffic-lights\"",
-        "tsc": "tsc --noEmit"
-    },
-    "type": "module",
-    "devDependencies": {
-        "@elgato/cli": "1.10.0",
-        "@rollup/plugin-commonjs": "29.0.3",
-        "@rollup/plugin-node-resolve": "15.3.1",
-        "@rollup/plugin-terser": "1.0.0",
-        "@rollup/plugin-typescript": "12.3.0",
-        "rollup": "4.63.2"
-    },
-    "dependencies": {
-        "@elgato/streamdeck": "3.0.0"
-    }
+  "name": "@tim0-12432/opencode-traffic-lights-streamdeck",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "com.tim0-12432.opencode-traffic-lights.sdPlugin"
+  ],
+  "scripts": {
+    "build": "rollup -c",
+    "watch": "rollup -c -w --watch.onEnd=\"streamdeck restart com.tim0-12432.opencode-traffic-lights\"",
+    "tsc": "tsc --noEmit",
+    "test": "tsc -p test/tsconfig.json && node --test --test-reporter=spec test/.build/streamdeck/test/contract.test.js",
+    "validate": "streamdeck validate com.tim0-12432.opencode-traffic-lights.sdPlugin",
+    "relink": "streamdeck unlink com.tim0-12432.opencode-traffic-lights && streamdeck link com.tim0-12432.opencode-traffic-lights.sdPlugin"
+  },
+  "dependencies": {
+    "@elgato/streamdeck": "3.0.0"
+  },
+  "devDependencies": {
+    "@elgato/cli": "1.10.0",
+    "@rollup/plugin-commonjs": "29.0.3",
+    "@rollup/plugin-node-resolve": "15.3.1",
+    "@rollup/plugin-terser": "1.0.0",
+    "@rollup/plugin-typescript": "12.3.0",
+    "rollup": "4.63.2",
+    "tslib": "2.8.1"
+  }
 }

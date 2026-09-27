@@ -7,21 +7,47 @@
     label { display: block; margin: 12px 0 4px; }
     input, select { width: 100%; box-sizing: border-box; }
     small { display: block; margin-top: 4px; opacity: .75; }
+    .row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+    .row small { flex: 1; margin-top: 0; }
+    .row button { flex: none; }
+    button { background: #333; color: #ddd; border: 1px solid #555; border-radius: 3px; padding: 2px 8px; cursor: pointer; }
+    button:hover { background: #444; }
+    #status { margin: 12px 0 0; min-height: 1.2em; opacity: .85; }
+    #status.error { color: #ef4444; opacity: 1; }
+    .custom { color: #eab308; }
   </style>
 </head>
 <body>
   <label for="instance">OpenCode instance ID</label>
-  <input id="instance" type="number" min="0" step="1" value="1">
+  <input id="instance" type="number" min="0" step="1">
+  <small>Clear this to go back to the default (<span id="defaultInstanceNote">1</span>).</small>
 
   <label for="greenImage">Green image</label>
-  <input id="greenImage" type="file" accept="image/png,image/jpeg,image/webp">
-  <small>Leave empty to use the built-in green circle.</small>
+  <div class="row">
+    <input id="greenImage" type="file" accept="image/png,image/jpeg">
+  </div>
+  <div class="row">
+    <small id="greenImageStatus"></small>
+    <button type="button" id="clearGreenImage" hidden>Use built-in</button>
+  </div>
 
   <label for="yellowImage">Yellow image</label>
-  <input id="yellowImage" type="file" accept="image/png,image/jpeg,image/webp">
+  <div class="row">
+    <input id="yellowImage" type="file" accept="image/png,image/jpeg">
+  </div>
+  <div class="row">
+    <small id="yellowImageStatus"></small>
+    <button type="button" id="clearYellowImage" hidden>Use built-in</button>
+  </div>
 
   <label for="redImage">Red image</label>
-  <input id="redImage" type="file" accept="image/png,image/jpeg,image/webp">
+  <div class="row">
+    <input id="redImage" type="file" accept="image/png,image/jpeg">
+  </div>
+  <div class="row">
+    <small id="redImageStatus"></small>
+    <button type="button" id="clearRedImage" hidden>Use built-in</button>
+  </div>
 
   <label for="tapMode">On tap</label>
   <select id="tapMode">
@@ -40,16 +66,58 @@
   <input id="arguments" placeholder='["--instance","2"]'>
   <small>Use an absolute program path. Arguments are not executed through a shell.</small>
 
+  <p id="status" role="status"></p>
+
   <script>
+    // Mirrors `DEFAULT_INSTANCE` in shared/contract.ts, which the plugin half
+    // reads as `settings.instance ?? DEFAULT_INSTANCE`. This property inspector
+    // is plain HTML with no module system and cannot import it, so the two must
+    // be kept in step BY HAND: if contract.ts changes, change this too.
+    const DEFAULT_INSTANCE = 1;
+
+    // `setImage` documents PNG and JPEG. WebP is deliberately NOT offered: it
+    // is not a format the property inspector can promise the key will accept.
+    const MAX_IMAGE_BYTES = 100_000;
+
+    // The settings keys are a contract with opencode-status.ts and must stay
+    // exactly these eight: instance, greenImage, yellowImage, redImage, tapMode,
+    // tapUrl, program, arguments. Anything stored under another name is
+    // invisible to the action, so a key is CLEARED by deleting it (absence
+    // means "default"), never by storing an empty string or a sentinel.
+    const IMAGE_SETTINGS = ["greenImage", "yellowImage", "redImage"];
+    const TEXT_SETTINGS = ["tapMode", "tapUrl", "program", "arguments"];
+
     let socket;
     let action;
     let context;
     let settings = {};
     let ready = false;
+    // A settings change made before the socket opened used to be dropped on the
+    // floor, while the field kept showing the value as though it were saved.
+    let pendingSend = false;
+    // Fields the user has typed into but not committed. An incoming settings
+    // frame must not overwrite those: every frame (including the echo of our
+    // own send) re-renders every field, which used to wipe half-typed values.
+    const unsavedFields = new Set();
+
+    const $ = (id) => document.getElementById(id);
+
+    function setStatus(message, isError = false) {
+      const element = $("status");
+      element.textContent = message;
+      element.className = isError ? "error" : "";
+    }
 
     function sendSettings() {
-      if (!ready || socket?.readyState !== WebSocket.OPEN) return;
+      if (!ready || socket?.readyState !== WebSocket.OPEN) {
+        // Flushed by `onopen`, so an edit made the instant the inspector opened
+        // is still saved.
+        pendingSend = true;
+        setStatus("Not connected to Stream Deck yet -- saving when it connects.");
+        return;
+      }
 
+      pendingSend = false;
       socket.send(JSON.stringify({
         event: "setSettings",
         action,
@@ -74,11 +142,22 @@
           uuid
         }));
         ready = true;
+
+        if (pendingSend) {
+          sendSettings();
+          setStatus("");
+        }
+      };
+
+      socket.onclose = function () {
+        ready = false;
       };
 
       socket.onmessage = function (message) {
         const incoming = JSON.parse(message.data);
         if (incoming.event === "didReceiveSettings") {
+          // Replaced rather than merged, because a key the user cleared is
+          // ABSENT from the echo and merging would resurrect the old value.
           settings = incoming.payload.settings || {};
           render();
         }
@@ -88,48 +167,160 @@
     };
 
     function render() {
-      document.getElementById("instance").value = settings.instance ?? 1;
-      document.getElementById("tapMode").value = settings.tapMode || "none";
-      document.getElementById("tapUrl").value = settings.tapUrl || "";
-      document.getElementById("program").value = settings.program || "";
-      document.getElementById("arguments").value = settings.arguments || "[]";
+      setField("instance", settings.instance ?? DEFAULT_INSTANCE);
+      setField("tapMode", settings.tapMode || "none");
+      setField("tapUrl", settings.tapUrl || "");
+      setField("program", settings.program || "");
+      setField("arguments", settings.arguments || "[]");
+
+      for (const name of IMAGE_SETTINGS) renderImageStatus(name);
     }
 
-    for (const name of ["tapMode", "tapUrl", "program", "arguments"]) {
-      document.getElementById(name).addEventListener("change", (event) => {
+    /**
+     * Writes `value` into a field, unless doing so would destroy something the
+     * user is in the middle of: a field with focus, or one holding an edit that
+     * has not been committed yet.
+     */
+    function setField(name, value) {
+      const field = $(name);
+      const text = String(value);
+
+      if (field === document.activeElement) return;
+      if (unsavedFields.has(name)) return;
+      if (field.value === text) return;
+
+      field.value = text;
+    }
+
+    /**
+     * Browsers forbid populating a file input, so the three boxes are always
+     * empty even when all three custom images are in force. This is the only
+     * place the truth can be shown, and it has to be driven from the settings
+     * every time a frame arrives.
+     */
+    function renderImageStatus(name) {
+      const custom = typeof settings[name] === "string" && settings[name] !== "";
+      const status = $(`${name}Status`);
+
+      status.textContent = custom
+        ? `Custom image active (${Math.round(settings[name].length / 1024)} KB stored).`
+        : "No custom image -- the built-in circle is used.";
+      status.className = custom ? "custom" : "";
+
+      $(`clear${name[0].toUpperCase()}${name.slice(1)}`).hidden = !custom;
+    }
+
+    function readImageAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+
+        reader.onload = () => resolve(reader.result);
+        // `onerror` fires with a ProgressEvent, not an Error, so it is
+        // normalised here. Left un-normalised it also rejected into a `try`-less
+        // `async` listener, which surfaced as an unhandled promise rejection
+        // inside the property inspector with nothing shown to the user.
+        reader.onerror = () => reject(
+          new Error(`"${file.name}" could not be read from disk.`)
+        );
+
+        reader.readAsDataURL(file);
+      });
+    }
+
+    for (const name of TEXT_SETTINGS) {
+      $(name).addEventListener("change", (event) => {
         settings[name] = event.target.value;
+        unsavedFields.delete(name);
+        setStatus("");
         sendSettings();
       });
     }
 
-    document.getElementById("instance").addEventListener("change", (event) => {
-      const value = Number(event.target.value);
-      if (!Number.isSafeInteger(value) || value < 0) return;
+    // `input` (not `change`) marks a field as holding an uncommitted edit, so a
+    // settings frame arriving mid-typing cannot wipe it. `change` above clears
+    // the mark when the value is finally committed.
+    for (const name of ["instance", "tapUrl", "program", "arguments"]) {
+      $(name).addEventListener("input", () => unsavedFields.add(name));
+    }
+
+    $("instance").addEventListener("change", (event) => {
+      const field = event.target;
+      const raw = field.value.trim();
+
+      unsavedFields.delete("instance");
+
+      if (raw === "") {
+        // `Number("")` is 0, which passes both guards below, so an emptied
+        // field used to be SAVED as instance 0: the key then targeted an
+        // instance nothing ever posted to, with no visible error and only a log
+        // line. Absence already means "the default", so delete the key instead.
+        delete settings.instance;
+        field.value = String(DEFAULT_INSTANCE);
+        setStatus(`Instance cleared -- using the default instance (${DEFAULT_INSTANCE}).`);
+        sendSettings();
+        render();
+        return;
+      }
+
+      const value = Number(raw);
+
+      if (!Number.isSafeInteger(value) || value < 0) {
+        setStatus(`"${raw}" is not a whole number of 0 or more. Instance left unchanged.`, true);
+        field.value = String(settings.instance ?? DEFAULT_INSTANCE);
+        return;
+      }
+
       settings.instance = value;
+      setStatus("");
       sendSettings();
     });
 
-    for (const name of ["greenImage", "yellowImage", "redImage"]) {
-      document.getElementById(name).addEventListener("change", async (event) => {
-        const file = event.target.files?.[0];
+    for (const name of IMAGE_SETTINGS) {
+      $(name).addEventListener("change", async (event) => {
+        const input = event.target;
+        const file = input.files?.[0];
+
+        // Always emptied, so picking the same file twice still fires `change`
+        // and so the input cannot hold a stale selection the status line then
+        // contradicts.
+        input.value = "";
         if (!file) return;
 
-        if (file.size > 100_000) {
-          alert("Please choose an image under 100 KB.");
-          event.target.value = "";
-          return;
+        try {
+          if (file.size > MAX_IMAGE_BYTES) {
+            throw new Error(
+              `"${file.name}" is ${Math.round(file.size / 1024)} KB; the limit is ${Math.round(MAX_IMAGE_BYTES / 1024)} KB.`
+            );
+          }
+
+          settings[name] = await readImageAsDataUrl(file);
+          unsavedFields.delete(name);
+          renderImageStatus(name);
+          setStatus("");
+          sendSettings();
+        } catch (error) {
+          // A rejected pick leaves the PREVIOUS setting in force, so the status
+          // line is re-rendered from `settings` rather than guessed at: if there
+          // was a custom image it is still active, and if there was not, the
+          // built-in circle still is.
+          renderImageStatus(name);
+          setStatus(error instanceof Error ? error.message : String(error), true);
         }
+      });
 
-        settings[name] = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
+      const clearId = `clear${name[0].toUpperCase()}${name.slice(1)}`;
 
+      $(clearId).addEventListener("click", () => {
+        // The only way back to the built-in circle once an image is set.
+        delete settings[name];
+        $(name).value = "";
+        renderImageStatus(name);
+        setStatus("");
         sendSettings();
       });
     }
+
+    $("defaultInstanceNote").textContent = String(DEFAULT_INSTANCE);
   </script>
 </body>
 </html>

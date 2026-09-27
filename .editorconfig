@@ -1,0 +1,26 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{json,ts,md}]
+indent_style = space
+indent_size = 2
+
+# Elgato tooling emits tabs, and the checked-in manifest already uses them.
+[*.sdPlugin/**]
+indent_style = tab
+indent_size = 4
+
+# `rollup.config.mjs` uses tabs.
+[*.mjs]
+indent_style = tab
+indent_size = 4
+
+# VS Code ships tab-indented JSON in this repo.
+[.vscode/*.json]
+indent_style = tab
+indent_size = 4

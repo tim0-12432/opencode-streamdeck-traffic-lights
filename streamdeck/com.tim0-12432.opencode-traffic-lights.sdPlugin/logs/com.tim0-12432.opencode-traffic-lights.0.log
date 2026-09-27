@@ -1,6 +1,3 @@
-2026-09-26T21:14:35.383Z DEBUG RegistrationParameters: port=28196
-2026-09-26T21:14:35.385Z DEBUG RegistrationParameters: pluginUUID=ec2428877191b61e0f0413d2517f1013
-2026-09-26T21:14:35.386Z DEBUG RegistrationParameters: registerEvent=registerPlugin
-2026-09-26T21:14:35.386Z DEBUG RegistrationParameters: info={"application":{"font":"Segoe UI","language":"de","platform":"windows","platformVersion":"10.0.26200","version":"7.1.0.22321"},"colors":{"buttonMouseOverBackgroundColor":"#464646FF","buttonPressedBackgroundColor":"#303030FF","buttonPressedBorderColor":"#646464FF","buttonPressedTextColor":"#969696FF","highlightColor":"#0078FFFF"},"devicePixelRatio":1,"devices":[{"id":"9d8304d331fbb3251a402a7f1960fb97","name":"Stream Deck Mini","size":{"columns":3,"rows":2},"type":1},{"id":"5b92b9e76d42be28d912c3f9cae9e9cc","name":"Virtual Stream Deck","size":{"columns":5,"rows":4},"type":11}],"plugin":{"uuid":"com.tim0-12432.opencode-traffic-lights","version":"0.1.0.0"}}
-2026-09-26T21:14:35.402Z TRACE Connection: {"device":"9d8304d331fbb3251a402a7f1960fb97","deviceInfo":{"name":"Stream Deck Mini","size":{"columns":3,"rows":2},"type":1},"event":"deviceDidConnect"}
-2026-09-26T21:14:35.403Z TRACE Connection: {"device":"5b92b9e76d42be28d912c3f9cae9e9cc","deviceInfo":{"name":"Virtual Stream Deck","size":{"columns":5,"rows":4},"type":11},"event":"deviceDidConnect"}
+2026-09-27T11:26:09.081Z ERROR Could not connect to Stream Deck: Error: Unable to establish a connection with Stream Deck, missing command line arguments: -port, -pluginUUID, -registerEvent, -info
+2026-09-27T11:26:09.091Z INFO  OpenCode status listening on 127.0.0.1:8765
+2026-09-27T11:26:12.253Z WARN  No visible key is configured for instance 1. Set the action's instance in the property inspector to 1 (or set OPENCODE_STREAMDECK_INSTANCE=1 on the OpenCode side).

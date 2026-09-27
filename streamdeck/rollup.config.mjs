@@ -28,12 +28,21 @@ const config = {
 			},
 		},
 		typescript({
-			mapRoot: isWatching ? "./" : undefined
+			tsconfig: "./tsconfig.json",
+			mapRoot: isWatching ? "./" : undefined,
+			// The default filter is scoped to this package, so it silently skipped
+			// ../shared/contract.ts and rollup then choked on raw TypeScript.
+			include: ["src/**/*.ts", "../shared/**/*.ts"]
 		}),
+		// `.ts` is in `extensions` because ../shared/contract.ts is consumed as RAW
+		// TypeScript (shared with the opencode package, which runs on Bun with no
+		// build step). Consumers import it extensionless as `shared/contract`, so
+		// without this rollup cannot resolve the import to a .ts file.
 		nodeResolve({
 			browser: false,
 			exportConditions: ["node"],
-			preferBuiltins: true
+			preferBuiltins: true,
+			extensions: [".ts", ".mjs", ".js", ".json", ".node"]
 		}),
 		commonjs(),
 		!isWatching && terser(),
