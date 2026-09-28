@@ -1,3 +1,9 @@
+// MUST STAY FIRST. This side-effect-only module chdirs into the `.sdPlugin`
+// folder before the SDK is evaluated, and an ESM bundle runs module bodies in
+// dependency order -- so importing it anywhere else would let
+// `@elgato/streamdeck` build its log target (and read the manifest) against the
+// wrong working directory first. It must also never come after the SDK import.
+import './ensure-cwd';
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { StringDecoder } from 'node:string_decoder';
@@ -14,24 +20,31 @@ import {
 import { MAX_TRACKED_INSTANCES, OpenCodeStatus } from './actions/opencode-status';
 
 /*
- * TODO(original artwork): all four images below are still Elgato's stock
- * `Counter` plugin template files, referenced by the manifest:
+ * ARTWORK: GENERATED FROM CODE, NO ELGATO ASSETS REMAIN
  *
- *   imgs/actions/counter/icon          -- action icon in the action list
- *   imgs/actions/counter/key           -- the key's default state image
- *   imgs/plugin/category-icon         -- the plugin's category icon
- *   imgs/plugin/marketplace           -- the plugin's marketplace icon
+ * Every image the manifest references is produced by
+ * `streamdeck/scripts/generate-images.mjs` (run first by `pnpm build` / `pnpm
+ * images`, and idempotent -- re-running yields byte-identical files):
  *
- * The first two are a countdown-timer glyph that has nothing to do with this
- * plugin. The last two are ELGATO'S OWN LOGO, which is a trademark problem: it
- * implies Stream Deck ships this plugin. All four should be replaced with
- * original traffic-light artwork (a three-lamp column for the action, a single
- * lamp for the key, a matching glyph for the two plugin icons).
+ *   imgs/actions/status/green   (+@2x)  -- the key's green state
+ *   imgs/actions/status/yellow  (+@2x)  -- the key's yellow state
+ *   imgs/actions/status/red     (+@2x)  -- the key's red state
+ *   imgs/actions/status/icon    (+@2x)  -- the three-lamp action icon
+ *   imgs/plugin/category-icon   (+@2x)  -- monochrome #FFFFFF on transparent
+ *   imgs/plugin/marketplace     (+@2x)  -- the Marketplace icon
  *
- * They are still here because real PNGs cannot be authored in this repo, and
- * deleting them would break `manifest.json` and fail `streamdeck validate`. Any
- * change to the manifest's `Icon`, `States[].Image`, `CategoryIcon` or top-level
- * `Icon` fields must be made together with the replacement files.
+ * This REPLACES a previous set of Elgato `Counter` sample files: a 20x20
+ * plus-sign action icon (below Elgato's minimum), Elgato's stock blue "chip" as
+ * the key image, and -- a trademark problem for any Marketplace submission --
+ * Elgato's own logo as both the `CategoryIcon` and the top-level `Icon`. The
+ * manifest paths for the two plugin icons were already `imgs/plugin/*`; only
+ * the files behind them changed, and the `counter/` folder is gone. The key
+ * states that used to render a grey three-circles placeholder now resolve to
+ * real green/yellow/red artwork.
+ *
+ * Any change to a manifest `Icon`, `States[].Image` or `CategoryIcon` must be
+ * made together with the generator, or the key silently falls back to Stream
+ * Deck's placeholder again.
  */
 
 const statusAction = new OpenCodeStatus();

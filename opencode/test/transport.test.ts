@@ -90,6 +90,28 @@ function sliceEventHookBody(source: string): string {
 
 const EVENT_HOOK_BODY = sliceEventHookBody(pluginSource);
 
+/**
+ * Marker slice: everything the factory runs BEFORE it hands `Hooks` back,
+ * from the `Plugin` assignment to the fire-and-forget seed dispatch.
+ *
+ * This region is the one that used to hang OpenCode's startup: the factory is
+ * `async`, OpenCode AWAITS it while booting, and the `await client.session
+ * .status()` seed inside it aimed a request at the server that was still
+ * booting. Response needs startup; startup needs the factory; the factory was
+ * waiting on the response.
+ */
+function sliceFactoryPreamble(source: string): string {
+  const from = 'export const StreamDeckStatus: Plugin = async ({ client }) => {';
+  const to = '  void seed().catch(() => undefined);';
+  const start = source.indexOf(from);
+  assert.notEqual(start, -1, `marker not found in ${PLUGIN_TS}: ${JSON.stringify(from)}`);
+  const end = source.indexOf(to, start + from.length);
+  assert.notEqual(end, -1, `marker not found in ${PLUGIN_TS}: ${JSON.stringify(to)}`);
+  return source.slice(start, end + to.length);
+}
+
+const FACTORY_PREAMBLE = sliceFactoryPreamble(pluginSource);
+
 // ---------------------------------------------------------------------------
 // Loading the real plugin modules.
 // ---------------------------------------------------------------------------
@@ -712,7 +734,13 @@ type ClientStub = {
     session: { status(): Promise<unknown> };
   };
   /** The result tuple `client.session.status()` resolves with. */
-  seed: { data?: Record<string, { type: string }>; error?: unknown; throws?: unknown };
+  seed: {
+    data?: Record<string, { type: string }>;
+    error?: unknown;
+    throws?: unknown;
+    /** Models the boot self-deadlock: the request is issued and NEVER settles. */
+    stalls?: boolean;
+  };
 };
 
 function createClientStub(): ClientStub {
@@ -727,6 +755,7 @@ function createClientStub(): ClientStub {
       },
       session: {
         status() {
+          if (stub.seed.stalls === true) return new Promise<unknown>(() => undefined);
           if (stub.seed.throws !== undefined) return Promise.reject(stub.seed.throws);
           return Promise.resolve({ data: stub.seed.data, error: stub.seed.error });
         },
@@ -815,9 +844,59 @@ describe('plugin: startup', () => {
     client.seed = { data: { ses_1: { type: 'busy' } } };
 
     const hooks = await startPlugin(client);
-    assert.equal(stubs().calls[0].state, 'red');
+
+    // The startup beat goes out green the instant the factory returns -- it does
+    // NOT wait for the seed -- and the seed's own beat then corrects it to red.
+    assert.equal(stubs().calls[0].state, 'green', 'the startup beat must not wait for the seed');
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'red');
 
     await hooks.dispose();
+  });
+
+  it('returns Hooks promptly even when the seed request never settles', async () => {
+    // THE REGRESSION TEST for the startup hang. `client.session.status()` is
+    // modelled as a request that is issued and never resolves, which is exactly
+    // what the plugin did to itself during boot: it aimed a request at the
+    // server that was still booting it. OpenCode AWAITS the factory, so a
+    // factory parked on that request never returns `Hooks`, startup never
+    // completes, and the session is a blank screen with no prompt.
+    active = installStubs();
+    const client = createClientStub();
+    client.seed = { stalls: true };
+
+    const startedAt = process.hrtime.bigint();
+    const hooks = await pluginModule.StreamDeckStatus({ client: client.client });
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+
+    assert.equal(typeof hooks.event, 'function', 'Hooks must be returned, not a pending promise');
+    assert.equal(typeof hooks.dispose, 'function');
+    // Nothing in the factory does I/O of its own, so it must complete in
+    // microtask time. 250ms is ~a million times the real cost.
+    assert.ok(elapsedMs < 250, `factory took ${elapsedMs}ms; the seed must not gate plugin load`);
+
+    // The load is complete and observable even though the seed is still parked.
+    await settle();
+    assert.ok(
+      client.logs.some((entry) => /traffic light active/.test(entry.message)),
+      'the startup line must be emitted without waiting for the seed',
+    );
+    assert.equal(stubs().calls.length, 1, 'the startup beat must still be sent');
+
+    await hooks.dispose();
+  });
+});
+
+describe('plugin: the factory never blocks on the seed', () => {
+  it('contains no await between the factory signature and the seed dispatch', () => {
+    // The behavioural test above proves the current shape works; this one stops
+    // a future edit from quietly reintroducing a top-level `await` -- or worse,
+    // an `await seed()` -- which would reintroduce the boot self-deadlock.
+    const awaits = FACTORY_PREAMBLE.match(/\bawait\b/g) ?? [];
+    assert.deepEqual(awaits, [], 'the factory preamble must not await anything');
+  });
+
+  it('dispatches the seed fire-and-forget, with a rejection guard attached', () => {
+    assert.match(FACTORY_PREAMBLE, /void seed\(\)\.catch\(/);
   });
 });
 

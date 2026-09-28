@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 import streamDeck, {
   action,
   SingletonAction,
@@ -6,7 +8,7 @@ import streamDeck, {
   type KeyDownEvent,
   type WillAppearEvent,
 } from '@elgato/streamdeck';
-import { DEFAULT_INSTANCE, type State } from '../../../shared/contract';
+import { DEFAULT_INSTANCE, STATES, type State } from '../../../shared/contract';
 import { PaintChain } from './paint-chain';
 
 type Settings = {
@@ -27,24 +29,89 @@ type Settings = {
  */
 export const MAX_TRACKED_INSTANCES = 32;
 
-const defaults: Record<State, string> = {
-  green: '#22c55e',
-  yellow: '#eab308',
-  red: '#ef4444',
-};
+/**
+ * A 1x1 opaque green PNG, the last-resort image.
+ *
+ * This is the ONLY form Stream Deck 7.1 is guaranteed to accept when nothing
+ * can be read from disk: a base64 data-URL with a declared MIME type. It is
+ * deliberately tiny, so the fallback path never ships a large string to the
+ * app. See `fallbackImage` for why nothing else is accepted.
+ */
+const MINIMAL_FALLBACK =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNQOhr3HwAElwJFIip35gAAAABJRU5ErkJggg==';
 
 /**
- * `setImage` has no data-URL decoder: it accepts a plugin-relative path, a
- * base64 string with a declared mime type, or raw SVG markup. Returning raw SVG
- * keeps the key painted even when the user picked no custom image.
+ * The resolved built-in image for each state, cached at module level.
+ *
+ * A repaint happens on every heartbeat (the client posts every 2s), so reading
+ * three PNGs from disk per repaint would mean a steady stream of synchronous
+ * file I/O for the lifetime of the plugin. Each state is therefore resolved at
+ * most once and the base64 string is reused. Caching the degraded results too
+ * means a permanently missing file is reported once, not once per heartbeat.
+ */
+const builtinImageCache = new Map<State, string>();
+
+/**
+ * Reads one of the generated key images and returns it as a base64 data-URL.
+ *
+ * WHY A DATA-URL AND NOT RAW SVG (this comment used to be wrong)
+ *
+ * `setImage` does have a data-URL decoder, and it resolves plugin-relative
+ * paths, but it does NOT accept raw SVG markup: the SDK forwards `payload.image`
+ * verbatim with no encoding or detection, and Stream Deck 7.1.0.22321 silently
+ * IGNORES an unrecognised value, leaving the key on its last (or manifest)
+ * image with no error anywhere. Passing an SVG string therefore looks like it
+ * worked while painting nothing. A base64 `data:image/png;base64,...` value is
+ * the form the property inspector's own `FileReader.readAsDataURL` produces and
+ * the form that is proven to reach the key, so that is what is sent here.
+ *
+ * The files are the generated traffic-light artwork
+ * (`streamdeck/scripts/generate-images.mjs`), read relative to the process
+ * working directory, which `ensure-cwd` has already pointed at the
+ * `.sdPlugin` root -- the same directory the manifest is resolved against, and
+ * the one Stream Deck itself sets when it launches the plugin.
+ *
+ * Never throws. If a state's own file cannot be read it degrades to a sibling
+ * state image and finally to the neutral `MINIMAL_FALLBACK` pixel, logging a
+ * warning rather than taking the plugin -- and the key's ability to repaint at
+ * all -- down with it.
  */
 function fallbackImage(state: State): string {
-  return (
-    '<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">' +
-    '<rect width="144" height="144" fill="#171717"/>' +
-    `<circle cx="72" cy="72" r="49" fill="${defaults[state]}"/>` +
-    '</svg>'
-  );
+  const cached = builtinImageCache.get(state);
+  if (cached !== undefined) return cached;
+
+  const relative = `imgs/actions/status/${state}.png`;
+  let dataUrl: string | null = null;
+
+  try {
+    // Preferred: this state's own artwork.
+    const buffer = readFileSync(path.resolve(relative));
+    dataUrl = `data:image/png;base64,${buffer.toString('base64')}`;
+  } catch (error) {
+    streamDeck.logger.warn(
+      `Could not read the built-in ${state} image (${relative}): ${String(error)}. Falling back to a minimal placeholder.`,
+    );
+    // Last resort that still paints *something*: a sibling state's file, then
+    // the neutral 1x1 pixel. All three live in the same folder, so this only
+    // helps if one file is individually missing -- but a wrong-colour light is
+    // better than a key frozen on a stale image, and the warning above records
+    // that the colour is approximate.
+    for (const sibling of STATES) {
+      if (sibling === state) continue;
+      try {
+        const buffer = readFileSync(path.resolve(`imgs/actions/status/${sibling}.png`));
+        dataUrl = `data:image/png;base64,${buffer.toString('base64')}`;
+        streamDeck.logger.warn(`Using the ${sibling} artwork as a stand-in for ${state}.`);
+        break;
+      } catch {
+        // Try the next sibling; the neutral pixel below is the final answer.
+      }
+    }
+  }
+
+  const result = dataUrl ?? MINIMAL_FALLBACK;
+  builtinImageCache.set(state, result);
+  return result;
 }
 
 function imageFor(settings: Settings, state: State): string {

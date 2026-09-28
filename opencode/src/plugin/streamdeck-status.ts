@@ -168,39 +168,69 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
   // Never hold the opencode process open.
   timer.unref();
 
-  // Seed from the server so a restart does not report green while a session is
-  // already busy. One loopback call inside try/catch; events will correct it.
-  //
-  // `session.status()` is declared `ThrowOnError = false`, so the hey-api
-  // client RESOLVES with `{ error }` for a non-2xx instead of throwing --
-  // checking `data` alone would swallow every HTTP-level failure silently and
-  // boot the plugin with no diagnostic at all.
-  let seedError: string | null = null;
-  try {
-    const { data, error } = await client.session.status();
-    if (error) {
-      seedError = describeSeedError(error);
-    } else if (data) {
-      for (const [sessionID, status] of Object.entries(data)) {
-        get(sessionID).status = status.type;
-      }
-    }
-  } catch (error) {
-    seedError = message(error);
-  }
-
-  if (seedError !== null) {
-    warn(`could not seed session status (${seedError}); continuing from events only`);
-  }
-
-  // The one INFO line. `log()`'s only other callers are the warning paths, so
-  // before this the log contained nothing at all on a healthy install and the
-  // README's `grep '\[opencode-traffic-lights\]'` check could not distinguish
-  // "loaded and fine" from "not loaded".
+  // The one INFO line, emitted SYNCHRONOUSLY -- before anything that could
+  // block. `log()`'s only other callers are the warning paths, so on a healthy
+  // install this is the only line the README's
+  // `grep '\[opencode-traffic-lights\]'` check can find, and it must not depend
+  // on the seed below ever settling.
   const url = stateUrl(host, port);
   log('info', `traffic light active -> ${url} as instance ${resolvedInstance}`);
 
   beat();
+
+  // Seed from the server so a restart does not report green while a session is
+  // already busy.
+  //
+  // FIRE AND FORGET, and that is load-bearing rather than stylistic. OpenCode
+  // AWAITS this factory during boot, and this request is aimed at the very
+  // server that is still booting us. Awaiting it here is a self-deadlock: the
+  // response cannot arrive until startup finishes, and startup cannot finish
+  // until this factory returns `Hooks`. The symptom is a blank, input-less TUI
+  // whose only plugin log output is the heartbeat's transport warnings -- the
+  // `setInterval` above is already beating while the factory is parked here, so
+  // the deck-side warnings keep coming forever and no startup line ever appears.
+  //
+  // Nothing is lost by not waiting. Every real state arrives via the `event`
+  // hook, so the seed is a best-effort head start, never a source of truth.
+  void seed().catch(() => undefined);
+
+  async function seed(): Promise<void> {
+    // `session.status()` is declared `ThrowOnError = false`, so the hey-api
+    // client RESOLVES with `{ error }` for a non-2xx instead of throwing --
+    // checking `data` alone would swallow every HTTP-level failure silently and
+    // boot the plugin with no diagnostic at all.
+    let seedError: string | null = null;
+    let seeded = 0;
+    try {
+      const { data, error } = await client.session.status();
+      if (error) {
+        seedError = describeSeedError(error);
+      } else if (data) {
+        for (const [sessionID, status] of Object.entries(data)) {
+          get(sessionID).status = status.type;
+          seeded += 1;
+        }
+      }
+    } catch (error) {
+      seedError = message(error);
+    }
+
+    if (seedError !== null) {
+      warn(`could not seed session status (${seedError}); continuing from events only`);
+    }
+
+    // Only when the seed actually taught us something, so the common
+    // fresh-boot case (nothing to seed) adds no redundant request to the wire.
+    //
+    // `drain()` first, because the startup beat issued just above is normally
+    // still in flight and the transport's concurrency cap would silently swallow
+    // this one. Waiting here is free -- we are already off the startup path, and
+    // the drain is bounded by REQUEST_TIMEOUT_MS.
+    if (seeded > 0) {
+      await transport.drain();
+      beat();
+    }
+  }
 
   return {
     event: async ({ event }: { event: Event }) => {

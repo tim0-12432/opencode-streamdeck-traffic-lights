@@ -10,7 +10,7 @@
 		{
 			"Name": "OpenCode Status",
 			"UUID": "com.tim0-12432.opencode-traffic-lights.status",
-			"Icon": "imgs/actions/counter/icon",
+			"Icon": "imgs/actions/status/icon",
 			"Tooltip": "Displays the status of your OpenCode session.",
 			"PropertyInspectorPath": "ui/status.html",
 			"Controllers": [
@@ -18,7 +18,7 @@
 			],
 			"States": [
 				{
-					"Image": "imgs/actions/counter/key"
+					"Image": "imgs/actions/status/green"
 				}
 			]
 		}
@@ -42,8 +42,7 @@
 		}
 	],
 	"Nodejs": {
-		"Version": "24",
-		"Debug": "disabled"
+		"Version": "24"
 	},
 	"UUID": "com.tim0-12432.opencode-traffic-lights"
 }

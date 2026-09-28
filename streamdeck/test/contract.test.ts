@@ -27,7 +27,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import net from 'node:net';
@@ -36,6 +36,7 @@ import { PassThrough } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { inflateSync } from 'node:zlib';
 
 import ts from 'typescript';
 
@@ -78,6 +79,12 @@ const REPO_ROOT = findRepoRoot(path.dirname(fileURLToPath(import.meta.url)));
 const PLUGIN_TS = path.join(REPO_ROOT, 'streamdeck', 'src', 'plugin.ts');
 const ACTION_TS = path.join(REPO_ROOT, 'streamdeck', 'src', 'actions', 'opencode-status.ts');
 const PAINT_CHAIN_TS = path.join(REPO_ROOT, 'streamdeck', 'src', 'actions', 'paint-chain.ts');
+const MANIFEST_JSON = path.join(
+  REPO_ROOT,
+  'streamdeck',
+  'com.tim0-12432.opencode-traffic-lights.sdPlugin',
+  'manifest.json',
+);
 
 const actionSource = readFileSync(ACTION_TS, 'utf8');
 const paintChainSource = readFileSync(PAINT_CHAIN_TS, 'utf8');
@@ -2037,3 +2044,318 @@ describe('the staleness sweeper -- real plugin.ts code on a controlled clock', (
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// The REAL manifest.json, as the Stream Deck software actually reads it.
+// ---------------------------------------------------------------------------
+
+describe('manifest.json -- Nodejs.Debug, which Stream Deck injects into node argv', () => {
+  /** The real file, parsed fresh on every access so a stale read cannot hide a bad edit. */
+  function nodejs(): Record<string, unknown> | undefined {
+    const manifest = JSON.parse(readFileSync(MANIFEST_JSON, 'utf8')) as Record<string, unknown>;
+    return manifest['Nodejs'] as Record<string, unknown> | undefined;
+  }
+
+  it('the real manifest parses and still declares the node runtime', () => {
+    const block = nodejs();
+    assert.ok(block, 'manifest.json must keep a Nodejs block');
+    assert.equal(typeof block['Version'], 'string');
+  });
+
+  it('REGRESSION: Nodejs.Debug is absent, `enabled`, `break`, or real node flags', () => {
+    // `Nodejs.Debug` is NOT an enum. Stream Deck splices the value verbatim
+    // into `execArgv` immediately before the entry script, so anything that is
+    // not a node option is consumed as the ENTRY MODULE PATH. `"Debug":
+    // "disabled"` therefore made node try to require a module literally named
+    // `disabled` and exit 1 before this bundle was ever evaluated.
+    //
+    // The shipping configuration is to OMIT the key: `enabled` and `break` both
+    // attach a Node inspector, which a normal install does not want.
+    const block = nodejs();
+    assert.ok(block, 'manifest.json must keep a Nodejs block');
+
+    const hasKey = Object.hasOwn(block, 'Debug');
+    if (!hasKey) return;
+
+    const value = block['Debug'];
+    assert.equal(
+      typeof value,
+      'string',
+      `Nodejs.Debug must be a string, got ${JSON.stringify(value)}`,
+    );
+
+    const debug = value as string;
+    const valid =
+      debug === 'enabled' || debug === 'break' || debug.trimStart().startsWith('-');
+
+    assert.equal(
+      valid,
+      true,
+      `Nodejs.Debug ${JSON.stringify(debug)} is neither a pre-defined value ` +
+        '(`enabled`, `break`) nor a node flag; it would be injected as an ' +
+        'argument and could be read as the entry module path',
+    );
+  });
+
+  it('REGRESSION: Nodejs.Debug is not the invalid value `disabled`', () => {
+    const block = nodejs();
+    assert.ok(block, 'manifest.json must keep a Nodejs block');
+    assert.notEqual(
+      block['Debug'],
+      'disabled',
+      '`disabled` is not a Stream Deck debug value: it is injected into node ' +
+        'argv as a bare token, where node reads it as the entry module path ' +
+        '(`Cannot find module ...\\disabled`, exit code 1)',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The generated images. These guard the two causes of "the key shows a grey
+// three-circles placeholder":
+//   (A) a manifest image path that does not resolve on disk, and
+//   (B) an image that is not really a PNG (or the wrong size / not transparent).
+// Both fail SILENTLY at runtime -- Stream Deck just keeps the placeholder -- so
+// the only place they can be caught is a test that reads the real files.
+// ---------------------------------------------------------------------------
+
+/** The `.sdPlugin` root, i.e. the folder the manifest is resolved against. */
+const SD_PLUGIN_DIR = path.dirname(MANIFEST_JSON);
+const IMGS_DIR = path.join(SD_PLUGIN_DIR, 'imgs');
+
+/** Every `.png` under `imgs/`, as paths relative to that folder. */
+function generatedPngs(): string[] {
+  const found: string[] = [];
+  const walk = (dir: string, prefix: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) walk(path.join(dir, entry.name), rel);
+      else if (entry.name.toLowerCase().endsWith('.png')) found.push(rel);
+    }
+  };
+  walk(IMGS_DIR, '');
+  return found.sort();
+}
+
+type DecodedPng = {
+  width: number;
+  height: number;
+  /** Colour type / bit depth / interlace, asserted to be the RGBA non-interlaced form. */
+  colorType: number;
+  depth: number;
+  interlace: number;
+  /** Raw RGBA, `width * height * 4` bytes, top-down. */
+  pixels: Buffer;
+  /** The raw inflated scanline stream, filter bytes included. */
+  raw: Buffer;
+};
+
+/**
+ * Decodes a PNG that the generator produced: 8-bit RGBA (colour type 6), no
+ * interlacing, every scanline filtered with byte 0 (None). This mirrors
+ * `generate-images.mjs` exactly, so it both proves the image is decodable and
+ * pins the structure the encoder promises.
+ */
+function decodePng(buf: Buffer): DecodedPng {
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  assert.deepEqual(
+    [...buf.subarray(0, 8)],
+    signature,
+    'not a PNG: the 8-byte signature is wrong',
+  );
+
+  let offset = 8;
+  let header: { width: number; height: number; depth: number; colorType: number; interlace: number } | null =
+    null;
+  const idats: Buffer[] = [];
+  const chunkTypes: string[] = [];
+
+  while (offset < buf.length) {
+    const length = buf.readUInt32BE(offset);
+    const type = buf.toString('ascii', offset + 4, offset + 8);
+    const data = buf.subarray(offset + 8, offset + 8 + length);
+    chunkTypes.push(type);
+
+    if (type === 'IHDR') {
+      header = {
+        width: data.readUInt32BE(0),
+        height: data.readUInt32BE(4),
+        depth: data[8]!,
+        colorType: data[9]!,
+        interlace: data[12]!,
+      };
+    } else if (type === 'IDAT') {
+      idats.push(data);
+    }
+
+    offset += 12 + length;
+  }
+
+  assert.ok(header, 'the PNG has no IHDR chunk');
+  assert.equal(chunkTypes[0], 'IHDR', 'IHDR must be the first chunk');
+  assert.equal(chunkTypes.at(-1), 'IEND', 'IEND must be the last chunk');
+  assert.ok(idats.length > 0, 'the PNG has no IDAT chunk');
+
+  const { width, height, depth, colorType, interlace } = header;
+  const raw = inflateSync(Buffer.concat(idats));
+  const stride = width * 4;
+  assert.equal(
+    raw.length,
+    (stride + 1) * height,
+    'the inflated scanline stream has the wrong length',
+  );
+
+  const pixels = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y += 1) {
+    const rowStart = y * (stride + 1);
+    assert.equal(raw[rowStart], 0, `scanline ${y} is not filtered with 0 (None)`);
+    raw.copy(pixels, y * stride, rowStart + 1, rowStart + 1 + stride);
+  }
+
+  return { width, height, colorType, depth, interlace, pixels, raw };
+}
+
+/** The four image paths the real manifest points at, in manifest order. */
+function manifestImageRefs(): string[] {
+  const manifest = JSON.parse(readFileSync(MANIFEST_JSON, 'utf8')) as {
+    Actions: Array<{ Icon?: string; States?: Array<{ Image?: string }> }>;
+    CategoryIcon?: string;
+    Icon?: string;
+  };
+
+  const refs: string[] = [];
+  for (const action of manifest.Actions) {
+    if (action.Icon) refs.push(action.Icon);
+    for (const state of action.States ?? []) {
+      if (state.Image) refs.push(state.Image);
+    }
+  }
+  if (manifest.CategoryIcon) refs.push(manifest.CategoryIcon);
+  if (manifest.Icon) refs.push(manifest.Icon);
+  return refs;
+}
+
+describe('the manifest images resolve on disk (a typo must not silently keep the placeholder)', () => {
+  it('every image path the manifest references exists as a real file', () => {
+    const refs = manifestImageRefs();
+    assert.equal(refs.length, 4, 'expected exactly 4 image references in the manifest');
+
+    for (const ref of refs) {
+      // The manifest omits the extension; Stream Deck appends `.png`.
+      const png = path.join(SD_PLUGIN_DIR, `${ref}.png`);
+      assert.ok(existsSync(png), `manifest image "${ref}" does not resolve to ${png}`);
+    }
+  });
+
+  it('each referenced image also has an @2x twin', () => {
+    for (const ref of manifestImageRefs()) {
+      const twin = path.join(SD_PLUGIN_DIR, `${ref}@2x.png`);
+      assert.ok(existsSync(twin), `manifest image "${ref}" has no @2x twin at ${twin}`);
+    }
+  });
+
+  it('references the generated traffic-light artwork, not the old Elgato counter template', () => {
+    const manifest = readFileSync(MANIFEST_JSON, 'utf8');
+    assert.doesNotMatch(manifest, /actions\/counter/, 'the deleted counter template is still referenced');
+    assert.match(manifest, /imgs\/actions\/status\/icon/, 'the action icon must be the generated one');
+    assert.match(manifest, /imgs\/actions\/status\/green/, 'the default state must be the generated green light');
+  });
+
+  it('the manifest still has exactly one unnamed state, so a fresh key is green', () => {
+    const manifest = JSON.parse(readFileSync(MANIFEST_JSON, 'utf8')) as {
+      Actions: Array<{ States?: Array<Record<string, unknown>> }>;
+    };
+    const states = manifest.Actions[0]?.States ?? [];
+    assert.equal(states.length, 1, 'the action must declare exactly one state');
+    assert.equal(states[0]?.['Image'], 'imgs/actions/status/green');
+    assert.equal(states[0]?.['Name'], undefined, 'the single state must be unnamed (the default)');
+  });
+
+  it('the built-in fallback reads the same generated files the manifest uses', () => {
+    // `fallbackImage()` must ship a base64 data-URL, not raw SVG: the app
+    // silently ignores an unrecognised `setImage` value. Pin both halves.
+    assert.doesNotMatch(actionSource, /<svg/, 'fallbackImage must not emit raw SVG markup');
+    assert.match(actionSource, /data:image\/png;base64,/);
+    assert.match(actionSource, /imgs\/actions\/status\/\$\{state\}\.png/);
+  });
+});
+
+describe('every generated image is a structurally valid PNG', () => {
+  // The exact size each generated file must decode to. Key states are 72/144;
+  // the icons are the >= 36px minimum (or 28px for the monochrome category
+  // icon, which Elgato's schema requires).
+  const EXPECTED: Record<string, { width: number; height: number }> = {
+    'actions/status/green.png': { width: 72, height: 72 },
+    'actions/status/green@2x.png': { width: 144, height: 144 },
+    'actions/status/yellow.png': { width: 72, height: 72 },
+    'actions/status/yellow@2x.png': { width: 144, height: 144 },
+    'actions/status/red.png': { width: 72, height: 72 },
+    'actions/status/red@2x.png': { width: 144, height: 144 },
+    'actions/status/icon.png': { width: 72, height: 72 },
+    'actions/status/icon@2x.png': { width: 144, height: 144 },
+    'plugin/category-icon.png': { width: 28, height: 28 },
+    'plugin/category-icon@2x.png': { width: 56, height: 56 },
+    'plugin/marketplace.png': { width: 512, height: 512 },
+    'plugin/marketplace@2x.png': { width: 1024, height: 1024 },
+  };
+
+  it('the expected set of files is exactly what the generator produced', () => {
+    assert.deepEqual(generatedPngs(), Object.keys(EXPECTED).sort());
+  });
+
+  for (const [rel, size] of Object.entries(EXPECTED)) {
+    it(`${rel} is a valid ${size.width}x${size.height} RGBA PNG`, () => {
+      const file = path.join(IMGS_DIR, ...rel.split('/'));
+      assert.ok(existsSync(file), `${rel} is missing -- run \`pnpm images\``);
+
+      const bytes = readFileSync(file);
+      assert.ok(bytes.length > 100, `${rel} is only ${bytes.length} bytes: suspiciously empty`);
+
+      const png = decodePng(bytes);
+      assert.equal(png.depth, 8, `${rel} must be 8-bit`);
+      assert.equal(png.colorType, 6, `${rel} must be colour type 6 (RGBA)`);
+      assert.equal(png.interlace, 0, `${rel} must not be interlaced`);
+      assert.equal(png.width, size.width, `${rel} has the wrong width`);
+      assert.equal(png.height, size.height, `${rel} has the wrong height`);
+    });
+  }
+
+  it('the action icon is at least the 36x36 minimum (never the old 20x20 plus sign)', () => {
+    for (const rel of ['actions/status/icon.png', 'actions/status/icon@2x.png']) {
+      const png = decodePng(readFileSync(path.join(IMGS_DIR, ...rel.split('/'))));
+      assert.ok(
+        png.width >= 36 && png.height >= 36,
+        `${rel} is ${png.width}x${png.height}, below the 36px action-icon minimum`,
+      );
+    }
+  });
+
+  it('the category icon is a transparent-background monochrome icon', () => {
+    for (const rel of ['plugin/category-icon.png', 'plugin/category-icon@2x.png']) {
+      const png = decodePng(readFileSync(path.join(IMGS_DIR, ...rel.split('/'))));
+
+      // Every corner must be fully transparent -- no opaque background box.
+      const corners: Array<[number, number]> = [
+        [0, 0],
+        [png.width - 1, 0],
+        [0, png.height - 1],
+        [png.width - 1, png.height - 1],
+      ];
+      for (const [x, y] of corners) {
+        const alpha = png.pixels[(y * png.width + x) * 4 + 3];
+        assert.equal(alpha, 0, `${rel} corner (${x},${y}) is not fully transparent (alpha ${alpha})`);
+      }
+
+      // ...and there must be a genuinely opaque WHITE pixel: flat #FFFFFF, not
+      // a colour and not a semi-transparent tint.
+      let opaqueWhite = 0;
+      for (let i = 0; i < png.width * png.height; i += 1) {
+        const o = i * 4;
+        const [r, g, b, a] = [png.pixels[o], png.pixels[o + 1], png.pixels[o + 2], png.pixels[o + 3]];
+        if (r === 255 && g === 255 && b === 255 && a === 255) opaqueWhite += 1;
+      }
+      assert.ok(opaqueWhite > 0, `${rel} has no fully opaque white pixel: it is not a white glyph`);
+    }
+  });
+});
+
