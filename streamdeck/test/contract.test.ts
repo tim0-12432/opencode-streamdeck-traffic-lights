@@ -577,63 +577,98 @@ describe('perSession() / aggregate() / derive() -- opencode/src/plugin/state.ts'
       status: 'idle',
       pending: new Set<string>(),
       error: false,
+      active: false,
       lastSeen: 0,
       ...overrides,
     };
   }
 
-  it('busy with a pending permission is yellow (the prompt outranks the work)', () => {
-    assert.equal(perSession(record({ status: 'busy', pending: new Set(['p1']) })), 'yellow');
-  });
-
-  it('busy on its own is red', () => {
-    assert.equal(perSession(record({ status: 'busy' })), 'red');
-  });
-
-  it('retry is red -- work in progress, nobody is being asked anything', () => {
-    assert.equal(perSession(record({ status: 'retry' })), 'red');
-  });
-
-  it('error is yellow', () => {
-    assert.equal(perSession(record({ error: true })), 'yellow');
-    assert.equal(perSession(record({ status: 'busy', error: true })), 'yellow');
-  });
-
+  // The mapping, in one place:
+  //   green  -- idle, or blocked on the user (a pending permission)
+  //   yellow -- busy with no tool and no text output: thinking
+  //   red    -- a tool is running, text is streaming, or the session errored
   it('idle with nothing pending is green', () => {
     assert.equal(perSession(record()), 'green');
+  });
+
+  it('busy with a pending permission is GREEN -- the prompt means at rest', () => {
+    // INVERTED from the previous mapping, where a prompt outranked the work
+    // and read yellow. A permission parks the turn on the user, which is
+    // exactly what green says.
+    assert.equal(perSession(record({ status: 'busy', pending: new Set(['p1']) })), 'green');
+    // Even with a stale `active` flag still latched.
+    assert.equal(perSession(record({ status: 'busy', active: true, pending: new Set(['p1']) })), 'green');
+  });
+
+  it('idle wins over a stale active flag -- the order is load-bearing', () => {
+    assert.equal(perSession(record({ status: 'idle', active: true })), 'green');
+  });
+
+  it('busy on its own is YELLOW -- busy, but no tool and no output', () => {
+    assert.equal(perSession(record({ status: 'busy' })), 'yellow');
+  });
+
+  it('retry is yellow too -- a provider retry emits no tokens and runs no tool', () => {
+    assert.equal(perSession(record({ status: 'retry' })), 'yellow');
+  });
+
+  it('active is red -- a running tool, or streaming text', () => {
+    assert.equal(perSession(record({ status: 'busy', active: true })), 'red');
+    assert.equal(perSession(record({ status: 'retry', active: true })), 'red');
+  });
+
+  it('error is red, and outranks everything', () => {
+    assert.equal(perSession(record({ error: true })), 'red');
+    assert.equal(perSession(record({ status: 'busy', error: true })), 'red');
+    // Including a pending prompt.
+    assert.equal(perSession(record({ status: 'busy', pending: new Set(['p1']), error: true })), 'red');
   });
 
   it('REGRESSION: idle must NOT clear a pending permission', () => {
     // A permission prompt parks the turn, so OpenCode legitimately emits
     // session.idle while it waits for the answer. Clearing `pending` there
-    // would flip the key green at the exact moment the user is being asked.
+    // would lose the fact that the session is waiting on you -- and since
+    // both states are green, the deck would look identical while the prompt
+    // silently disappeared from the model.
     const parked = record({ status: 'idle', pending: new Set(['permission-1']) });
-    assert.equal(perSession(parked), 'yellow');
-    assert.equal(derive([parked]), 'yellow');
+    assert.equal(perSession(parked), 'green');
+    assert.equal(derive([parked]), 'green');
   });
 
-  it('REGRESSION: error must not be cleared by going idle either', () => {
-    assert.equal(perSession(record({ status: 'idle', error: true })), 'yellow');
+  it('REGRESSION: idle must not clear an error either', () => {
+    // Under the new mapping the error is RED, and a failing session goes idle
+    // straight afterwards. `perSession` is pure, so this asserts the flag
+    // still wins once the pump has deliberately kept it.
+    assert.equal(perSession(record({ status: 'idle', error: true })), 'red');
   });
 
-  it('aggregate: any yellow anywhere beats any red anywhere', () => {
-    assert.equal(aggregate(['red', 'yellow']), 'yellow');
-    assert.equal(aggregate(['yellow', 'red']), 'yellow');
-    assert.equal(aggregate(['green', 'red', 'yellow', 'red']), 'yellow');
+  it('aggregate: any red anywhere beats any yellow anywhere', () => {
+    assert.equal(aggregate(['red', 'yellow']), 'red');
+    assert.equal(aggregate(['yellow', 'red']), 'red');
+    assert.equal(aggregate(['green', 'red', 'yellow', 'red']), 'red');
   });
 
-  it('aggregate: red wins when there is no yellow, green when there is neither', () => {
-    assert.equal(aggregate(['green', 'red']), 'red');
+  it('aggregate: yellow wins when there is no red, green when there is neither', () => {
+    assert.equal(aggregate(['green', 'yellow']), 'yellow');
+    assert.equal(aggregate(['yellow', 'green']), 'yellow');
     assert.equal(aggregate(['green', 'green']), 'green');
     assert.equal(aggregate([]), 'green');
   });
 
-  it('derive: one busy session among idle sessions is red', () => {
+  it('derive: a thinking session among idle sessions is yellow', () => {
     const sessions = [record(), record({ status: 'busy' }), record()];
+    assert.equal(derive(sessions), 'yellow');
+  });
+
+  it('derive: one working session among idle sessions is red', () => {
+    const sessions = [record(), record({ status: 'busy', active: true }), record()];
     assert.equal(derive(sessions), 'red');
   });
 
-  it('derive: a pending permission anywhere makes the whole deck yellow', () => {
+  it('derive: a session waiting on a prompt does not light the deck at all', () => {
+    // The inverse of the old assertion: a prompt used to make the WHOLE deck
+    // yellow. It now reads green for that session, so a second busy session
+    // decides the key's colour on its own.
     const sessions = [
       record({ status: 'busy' }),
       record({ status: 'idle', pending: new Set(['perm-9']) }),
@@ -641,13 +676,18 @@ describe('perSession() / aggregate() / derive() -- opencode/src/plugin/state.ts'
     assert.equal(derive(sessions), 'yellow');
   });
 
+  it('derive: a failed session outranks a working one', () => {
+    const sessions = [record({ status: 'busy', active: true }), record({ error: true })];
+    assert.equal(derive(sessions), 'red');
+  });
+
   it('derive: no sessions is green', () => {
     assert.equal(derive([]), 'green');
   });
 
-  it('derive: several pending permissions still read as one yellow', () => {
+  it('derive: several pending permissions still read as one green', () => {
     const many = record({ pending: new Set(['a', 'b', 'c']) });
-    assert.equal(derive([many]), 'yellow');
+    assert.equal(derive([many]), 'green');
   });
 });
 

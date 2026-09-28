@@ -3,11 +3,26 @@
 Mirror your OpenCode agent's status to a single Elgato Stream Deck key, so you
 can tell from across the room whether the agent needs you.
 
-- **Green** — idle. Nothing is happening, nothing is being asked of you.
-- **Yellow** — waiting on you. A permission prompt is open, or a session errored.
-  Come look.
-- **Red** — working. Tools are running, a turn is in flight, or the provider is
-  retrying.
+- **Green** — at rest. Nothing is running, **or** a permission prompt is open
+  and waiting on you.
+- **Yellow** — busy, but no tool and no text output. The model is thinking.
+- **Red** — a tool is running, text is being written, or the session **errored**.
+
+One OpenCode process can host several sessions at once; the key shows the most
+severe of them (`green < yellow < red`), so a single running tool lights it red
+even if everything else is idle.
+
+Text output only counts as "actively generating" for `ACTIVITY_TTL_MS` (5 s)
+after its last update, so a session that was streaming and then goes quiet for
+longer than that drops from red back to yellow — that is the model thinking
+rather than working. A session that was never producing anything is yellow the
+whole time, so red is only ever something it was already doing. A **running
+tool** is never downgraded that way: a tool like `sleep 60` emits no events at
+all while it runs, so red holds for the whole call. A session **error** is red
+and expires after 1 minute (`ERROR_TTL_MS`) on its own — it is deliberately
+*not* cleared by the `session.idle` that follows a failure, because that idle
+arrives immediately afterwards and clearing there would make red invisible for
+exactly the failures that matter most.
 
 ## Requirements
 
@@ -178,18 +193,27 @@ waiting for a transition that may never come.
   transport, *drains* the in-flight beat (so a `red` already on the wire is
   written first — TCP gives no ordering guarantee across connections), then
   flushes one `green`, all inside a 300 ms bound.
-- **A pending permission is not cleared by an idle transition.** OpenCode
-  legitimately emits `session.idle` while a permission prompt parks the turn, so
-  honouring it would flip the light green at the exact moment you are being
-  asked a question. Pending prompts have their own lifetime: they are cleared by
-  an actual `permission.replied`, by a `permission.ask` that resolves without
-  asking, by `session.deleted`, or by a 5-minute safety TTL for a lost reply.
-- **An error is *not* sticky.** Unlike a permission, a stale yellow is worse
-  than no yellow, because it sends you to a session that finished minutes ago.
-  `error` is cleared by any `session.status`/`session.idle`, by a tool part that
-  goes `pending`, `running` or `completed`, and — as a safety net for a fatal
+- **A pending permission is not cleared by an idle transition.** A permission
+  prompt parks the turn, so OpenCode legitimately emits `session.idle` while it
+  waits for your answer — the session really is at rest, which is why a pending
+  prompt reads **green**, exactly like an idle session. The prompt still has to
+  survive that transition, or the light would report "nothing is waiting on
+  you" at the exact moment you are being asked a question. Pending prompts have
+  their own lifetime: they are cleared by an actual `permission.replied`, by a
+  `permission.ask` that resolves without asking, by `session.deleted`, or by a
+  5-minute safety TTL for a lost reply.
+- **Thinking is yellow, and only for 5 s at a time.** While text is streaming
+  the session is red, but a text part only counts as "actively generating" for
+  `ACTIVITY_TTL_MS`. After that a still-busy session with no tool and no output
+  reads as yellow until the next part arrives. A running tool is exempt: it has
+  no TTL, because a long tool call emits no events while it runs.
+- **An error is *not* sticky, and is *not* cleared by going idle.** Unlike a
+  permission, a stale red is worse than no red, because it sends you to a
+  session that finished minutes ago. `error` is cleared by a tool part that goes
+  `pending`, `running` or `completed`, and — as a safety net for a fatal
   `ApiError`/`ProviderAuthError`, which is normally the *last* event of a turn
-  with no `session.idle` behind it — by a 1-minute TTL.
+  and is immediately followed by `session.idle` — by a 1-minute TTL. An idle
+  transition on its own does **not** clear it, or the failure would be invisible.
 
 ## Dev escape hatch
 
@@ -225,10 +249,15 @@ move the deck side too, or nothing will connect).
   Stream Deck app surfaces the crash, rather than staying up and deaf with a
   permanently misleading green key. Close the other copy — a leftover
   `streamdeck` process from `pnpm watch` is the usual culprit.
-- **Permission prompts never turn the light yellow.** Make sure OpenCode is
-  actually running the plugin. On a healthy start the plugin emits exactly one
-  `info` line, so grep the OpenCode log for `[opencode-traffic-lights]` and
-  look for:
+- **A permission prompt reads green, and that is not a stuck key.** A prompt
+  parks the turn and blocks it on you, which is exactly what green means — the
+  same at-rest reading as an idle session. It is also worth knowing that the
+  prompt *survives* the `session.idle` that OpenCode emits while the turn is
+  parked, so the light stays honest for as long as you are being asked a
+  question. If you expected some other colour, or the key is not behaving at
+  all, make sure OpenCode is actually running the plugin. On a healthy start
+  the plugin emits exactly one `info` line, so grep the OpenCode log for
+  `[opencode-traffic-lights]` and look for:
 
   ```
   [opencode-traffic-lights] traffic light active -> http://127.0.0.1:8765/state as instance 1
@@ -296,9 +325,9 @@ Tests are real in **both** packages — `pnpm test` runs `node --test` in each:
 - `opencode/test/transport.test.ts` — the OpenCode half. It imports
   `shared/contract.ts` and `state.ts` as real modules, and loads the real
   `transport.ts` / `streamdeck-status.ts` by transpiling them from disk, so
-  the backoff ladder, the in-flight guard, the error TTL and the `dispose`
-  ordering under test are the shipped code. Only `fetch` and the OpenCode
-  `client` are stubbed.
+  the colour mapping, the backoff ladder, the in-flight guard, the error TTL,
+  the text-activity TTL and the `dispose` ordering under test are the shipped
+  code. Only `fetch` and the OpenCode `client` are stubbed.
 
 Neither suite adds a dependency: both are plain `node:test`. `typescript` is
 already a devDependency, which is what makes the runtime transpile possible.

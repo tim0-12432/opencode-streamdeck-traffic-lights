@@ -2,6 +2,7 @@ import type { Plugin } from '@opencode-ai/plugin';
 import type { Event } from '@opencode-ai/sdk';
 
 import {
+  ACTIVITY_TTL_MS,
   DEFAULT_INSTANCE,
   ENV_INSTANCE,
   ERROR_TTL_MS,
@@ -22,8 +23,36 @@ import type { SessionRecord, SessionStatusKind } from './state';
 /** Upper bound on the final `green` flush performed during `dispose`. */
 const DISPOSE_FLUSH_MS = 300;
 
+/**
+ * A live session as the event pump sees it: the pure `SessionRecord` the
+ * decision function consumes, plus the two raw signals that `active` is
+ * derived from.
+ *
+ * `active` is a GETTER, not a stored field, and that is the point: the whole
+ * file can flip `toolRunning` / `textActive` and there is no way for the
+ * derived boolean to drift away from them. It also cannot be assigned, so a
+ * future edit cannot quietly introduce a third source of truth.
+ */
+type LiveSession = SessionRecord & {
+  /**
+   * A tool call is in flight. NO TTL: a long-running tool (`sleep 60`, a
+   * deploy) emits nothing at all while it runs, so a time-based expiry would
+   * downgrade a working agent to "thinking" for most of a minute. Cleared only
+   * by the tool's own `completed`/`error` part, or by `session.idle`.
+   */
+  toolRunning: boolean;
+  /**
+   * Text was generated within the last `ACTIVITY_TTL_MS`. This one IS
+   * time-bounded, because a model that has gone quiet mid-turn is genuinely
+   * thinking -- and thinking is yellow, not red.
+   */
+  textActive: boolean;
+  /** When `textActive` was last stamped, ms. Zero when `textActive` is false. */
+  textAt: number;
+};
+
 export const StreamDeckStatus: Plugin = async ({ client }) => {
-  const sessions = new Map<string, SessionRecord>();
+  const sessions = new Map<string, LiveSession>();
   /** When each pending permission id was first seen, for TTL expiry. */
   const pendingAt = new Map<string, number>();
   /** When each session's error flag was raised, for `ERROR_TTL_MS` expiry. */
@@ -67,17 +96,24 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
     log,
   });
 
-  function get(sessionID: string): SessionRecord {
+  function get(sessionID: string): LiveSession {
     const existing = sessions.get(sessionID);
     if (existing) {
       existing.lastSeen = Date.now();
       return existing;
     }
 
-    const record: SessionRecord = {
+    const record: LiveSession = {
       status: 'idle',
       pending: new Set<string>(),
       error: false,
+      toolRunning: false,
+      textActive: false,
+      textAt: 0,
+      // DERIVED, never stored. The two signals above are the only truth.
+      get active(): boolean {
+        return this.toolRunning || this.textActive;
+      },
       lastSeen: Date.now(),
     };
     sessions.set(sessionID, record);
@@ -110,14 +146,37 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
     errorAt.delete(sessionID);
   }
 
+  function stopWorking(sessionID: string): void {
+    // Everything that makes a session "actively generating". Called when the
+    // turn demonstrably ends.
+    const record = sessions.get(sessionID);
+    if (!record) return;
+    record.toolRunning = false;
+    record.textActive = false;
+    record.textAt = 0;
+  }
+
   function setStatus(sessionID: string, status: SessionStatusKind): void {
     const record = get(sessionID);
     record.status = status;
-    clearError(sessionID);
-    // NOTE: `pending` is intentionally untouched. A permission prompt parks the
-    // turn, so opencode legitimately emits `session.idle` while it waits for
-    // your answer. Clearing here would flip the light green at the exact
-    // moment you are being prompted, which destroys the whole feature.
+    if (status === 'idle') {
+      stopWorking(sessionID);
+    }
+    // `error` is deliberately NOT cleared here. Under the new mapping an error
+    // is RED, and a failing session goes idle IMMEDIATELY afterwards -- the
+    // failure ends the turn, it does not continue it. Clearing the flag on
+    // idle would therefore make red invisible for exactly the failures that
+    // matter most. ERROR_TTL_MS is what bounds it, and that is the only thing
+    // that does.
+    //
+    // NOTE: `pending` is intentionally untouched too. A permission prompt parks
+    // the turn, so OpenCode legitimately emits `session.idle` while it waits
+    // for your answer. Pending is GREEN, so the light already says the right
+    // thing there, but the prompt still has to survive the turn boundary or
+    // the light would report "at rest, nothing waiting on you" while you are
+    // being asked a question. Its lifetime is its own: a real
+    // `permission.replied`, a `permission.ask` that resolves without asking,
+    // `session.deleted`, or PERMISSION_TTL_MS for a lost reply.
   }
 
   function expire(): void {
@@ -129,11 +188,26 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
         record.pending.delete(permissionID);
       }
     }
-    // An error is NOT sticky by design -- unlike a permission prompt, a stale
-    // yellow is worse than no yellow, because it sends you to a session that
-    // finished minutes ago. `ERROR_TTL_MS` is the safety net for the fatal
-    // errors (ApiError / ProviderAuthError) that are the LAST event of a turn,
-    // with no `session.idle` behind them to clear the flag.
+    // Text activity is the ONE thing that expires on a timer. While the window
+    // is open the session is red (something is being written); once it lapses
+    // the session drops to yellow, which is the honest reading of a model that
+    // stopped emitting tokens.
+    //
+    // `toolRunning` is deliberately absent from this sweep: a tool that runs
+    // for a minute without emitting a single event is still a tool that is
+    // running, and downgrading it to "thinking" would be a lie.
+    for (const record of sessions.values()) {
+      if (!record.textActive) continue;
+      if (now - record.textAt < ACTIVITY_TTL_MS) continue;
+      record.textActive = false;
+      record.textAt = 0;
+    }
+    // An error is NOT cleared by an idle transition, for the reason spelled
+    // out in `setStatus`. So ERROR_TTL_MS is not merely a safety net here, it
+    // is the ONLY thing that ever clears a fatal ApiError/ProviderAuthError --
+    // those are the last event of a turn, with nothing behind them. Without it
+    // the key would sit red for a session that finished minutes ago, which is
+    // worse than no red at all.
     for (const [sessionID, at] of errorAt) {
       if (now - at < ERROR_TTL_MS) continue;
       errorAt.delete(sessionID);
@@ -151,6 +225,9 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
       for (const permissionID of record.pending) {
         pendingAt.delete(permissionID);
       }
+      // Dropping the record drops `toolRunning` / `textActive` / `textAt`
+      // with it -- they are fields, not parallel maps, so they cannot leak.
+      // `errorAt` IS a parallel map and has to be cleared by hand.
       errorAt.delete(sessionID);
       sessions.delete(sessionID);
     }
@@ -179,7 +256,9 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
   beat();
 
   // Seed from the server so a restart does not report green while a session is
-  // already busy.
+  // already busy. Note that a seeded `busy` session carries no part-level
+  // evidence, so it lands on YELLOW (thinking) rather than red -- which is the
+  // honest reading, and still unmistakably not "idle".
   //
   // FIRE AND FORGET, and that is load-bearing rather than stylistic. OpenCode
   // AWAITS this factory during boot, and this request is aimed at the very
@@ -238,6 +317,8 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
       // never block on I/O -- the POST is fired and forgotten.
       switch (event.type) {
         case 'permission.updated': {
+          // Blocks the turn on the user, so the session reads GREEN: the light
+          // means "waiting on you", exactly like an idle session.
           markPending(event.properties.sessionID, event.properties.id);
           break;
         }
@@ -264,11 +345,12 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
           } else {
             // NO global fallback. The previous code stamped `error` on every
             // known session, which poisoned sessions that would never receive
-            // a `setStatus` to clear it and so stayed yellow until they aged
-            // out. The trade is deliberate: an unattributable error is reported
-            // in the log (visible, greppable, actionable) instead of being
-            // smeared across the whole deck (invisible and wrong). The deck
-            // simply keeps whatever colour it already had.
+            // an event to clear the flag and so stayed red -- the loudest
+            // possible colour -- until they aged out. The trade is deliberate:
+            // an unattributable error is reported in the log (visible,
+            // greppable, actionable) instead of being smeared across the whole
+            // deck (invisible and wrong). The deck simply keeps whatever colour
+            // it already had.
             warn('session.error carried no sessionID; not attributing it to any session');
           }
           break;
@@ -276,31 +358,52 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
 
         case 'message.part.updated': {
           const part = event.properties.part;
-          if (part.type !== 'tool') break;
+          if (part.type === 'tool') {
+            const record = get(part.sessionID);
+            switch (part.state.status) {
+              case 'pending':
+              case 'running': {
+                // No TTL on this one -- see `LiveSession.toolRunning`.
+                record.toolRunning = true;
+                record.status = 'busy';
+                clearError(part.sessionID);
+                break;
+              }
+              case 'error': {
+                record.toolRunning = false;
+                markError(part.sessionID);
+                record.status = 'idle';
+                break;
+              }
+              case 'completed': {
+                record.toolRunning = false;
+                record.status = 'idle';
+                // An error is not sticky. One early tool error followed by a
+                // stream of `completed` parts means the agent recovered and is
+                // demonstrably working; leaving the light red for the rest of
+                // the turn would be a lie. `ERROR_TTL_MS` remains the safety
+                // net for errors with no follow-up event at all.
+                clearError(part.sessionID);
+                break;
+              }
+            }
+            break;
+          }
 
-          const record = get(part.sessionID);
-          switch (part.state.status) {
-            case 'pending':
-            case 'running': {
-              record.status = 'busy';
-              clearError(part.sessionID);
-              break;
-            }
-            case 'error': {
-              markError(part.sessionID);
-              record.status = 'idle';
-              break;
-            }
-            case 'completed': {
-              record.status = 'idle';
-              // An error is not sticky. One early tool error followed by a
-              // stream of `completed` parts means the agent recovered and is
-              // demonstrably working; leaving the light yellow for the rest of
-              // the turn would be a lie. `ERROR_TTL_MS` remains the safety net
-              // for errors with no follow-up event at all.
-              clearError(part.sessionID);
-              break;
-            }
+          if (part.type === 'text') {
+            // Synthetic parts (injected by the SDK, not written by the model)
+            // and ignored parts (injected by the TUI/plugin layer) are not
+            // output. Counting them would paint the key red for a turn that is
+            // only narrating.
+            if (part.synthetic === true || part.ignored === true) break;
+
+            const record = get(part.sessionID);
+            record.textActive = true;
+            record.textAt = Date.now();
+            // `status` is deliberately NOT touched. A text part must not
+            // resurrect a session that is idle -- `perSession` checks
+            // `status === 'idle'` before `active`, so a stale stream window
+            // can never turn a finished session red.
           }
           break;
         }
@@ -310,6 +413,9 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
           for (const permissionID of sessions.get(info.id)?.pending ?? []) {
             pendingAt.delete(permissionID);
           }
+          // The record itself carries `toolRunning` / `textActive` / `textAt`,
+          // so deleting it clears all three; `errorAt` is a parallel map and
+          // has to be dropped explicitly.
           errorAt.delete(info.id);
           sessions.delete(info.id);
           break;
@@ -329,6 +435,10 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
     },
 
     'permission.ask': async (input, output) => {
+      // Mechanism unchanged: an unresolved prompt is remembered under its own
+      // lifetime. The resulting colour is green -- a prompt means the turn is
+      // parked on the user, which is the same at-rest reading as an idle
+      // session, so it no longer outranks anything.
       if (output.status === 'ask') {
         markPending(input.sessionID, input.id);
       } else {

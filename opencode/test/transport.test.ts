@@ -19,10 +19,13 @@
  *     deadline-vs-failure attribution under test are therefore the real code.
  *  4. `opencode/src/plugin/streamdeck-status.ts` -- loaded the same way, with
  *     the REAL `transport` and `state` modules injected. The `event` switch,
- *     the heartbeat routine, the error TTL and the `dispose` ordering under
- *     test are the real code. Only the two edges are stubbed, and neither can
- *     be real here: `fetch` (there is no deck in this process) and the
- *     OpenCode `client` (there is no OpenCode in this process).
+ *     the heartbeat routine, the error TTL, the text-activity TTL, the whole
+ *     session -> colour mapping (including the pending-is-green inversion) and
+ *     the `dispose` ordering under test are the real code. Only the two edges
+ *     are stubbed, and neither can be real here: `fetch` (there is no deck in
+ *     this process) and the OpenCode `client` (there is no OpenCode in this
+ *     process).
+
  *
  * Markers are asserted, so a refactor that moves the code out of a sliced
  * region fails loudly instead of silently testing a stale copy.
@@ -38,7 +41,10 @@ import ts from 'typescript';
 
 import * as contract from '../../shared/contract.js';
 import * as state from '../src/plugin/state.js';
+import { aggregate, derive, perSession } from '../src/plugin/state.js';
+import type { SessionRecord } from '../src/plugin/state.js';
 import {
+  ACTIVITY_TTL_MS,
   BACKOFF_MAX_MS,
   BACKOFF_MIN_MS,
   ENV_INSTANCE,
@@ -50,6 +56,7 @@ import {
   stateUrl,
   type State,
 } from '../../shared/contract.js';
+
 
 // ---------------------------------------------------------------------------
 // Locating the repository, so the real sources can be read from the compiled
@@ -379,6 +386,14 @@ describe('shared/contract.ts', () => {
     assert.ok(ERROR_TTL_MS < SESSION_TTL_MS);
   });
 
+  it('gives the text-activity window at least one heartbeat to be seen in', () => {
+    // `expire()` only runs on the HEARTBEAT_MS sweep, so an activity window
+    // shorter than the interval could never be observed as open -- every part
+    // would be yellow on the very beat that observed it.
+    assert.ok(ACTIVITY_TTL_MS > HEARTBEAT_MS, `${ACTIVITY_TTL_MS} must exceed ${HEARTBEAT_MS}`);
+  });
+
+
   it('resolves a URL that the transport and the server agree on', () => {
     assert.equal(stateUrl('127.0.0.1', 8765), 'http://127.0.0.1:8765/state');
   });
@@ -399,8 +414,80 @@ describe('shared/contract.ts', () => {
 });
 
 // ---------------------------------------------------------------------------
+// The decision function must stay a pure function of its input.
+// ---------------------------------------------------------------------------
+
+describe('opencode/src/plugin/state.ts is pure', () => {
+  const STATE_TS = path.join(REPO_ROOT, 'opencode', 'src', 'plugin', 'state.ts');
+
+  it('imports nothing but one type-only import', () => {
+    // A runtime import would drag `contract` (or worse, a Node global) into
+    // the one file that has to be a pure function of its records.
+    const source = readFileSync(STATE_TS, 'utf8');
+    const runtimeImports = source
+      .split('\n')
+      .filter((line) => /^\s*import\b/.test(line) && !/^\s*import\s+type\b/.test(line));
+    assert.deepEqual(runtimeImports, [], `state.ts must stay import-free, found: ${runtimeImports.join(', ')}`);
+
+    const typeImports = source.split('\n').filter((line) => /^\s*import\s+type\b/.test(line));
+    assert.equal(typeImports.length, 1, `expected exactly one type-only import, found ${typeImports.length}`);
+    assert.match(typeImports[0], /shared\/contract/);
+  });
+
+  it('holds no clock, no timers and no node globals', () => {
+    // Time is the PUMP's job: `expire()` and `Date.now()` live in
+    // `streamdeck-status.ts`. If `state.ts` ever read a clock, `perSession`
+    // would stop being a function of its argument alone and the whole test
+    // suite above would be measuring the machine it ran on.
+    const source = readFileSync(STATE_TS, 'utf8');
+    for (const forbidden of [
+      'Date.now',
+      'new Date',
+      'setTimeout',
+      'setInterval',
+      'process.',
+      'globalThis',
+      'performance.',
+      'Math.random',
+      'fetch(',
+      'require(',
+    ]) {
+      assert.ok(!source.includes(forbidden), `state.ts must not reference ${forbidden}`);
+    }
+  });
+
+  it('does not mutate the record it is given', () => {
+    const record: SessionRecord = {
+      status: 'busy',
+      pending: new Set<string>(['p1']),
+      error: false,
+      active: true,
+      lastSeen: 42,
+    };
+    const before = {
+      status: record.status,
+      pending: [...record.pending],
+      error: record.error,
+      active: record.active,
+      lastSeen: record.lastSeen,
+    };
+
+    perSession(record);
+    aggregate([perSession(record)]);
+    derive([record, record]);
+
+    assert.equal(record.status, before.status);
+    assert.deepEqual([...record.pending], before.pending);
+    assert.equal(record.error, before.error);
+    assert.equal(record.active, before.active);
+    assert.equal(record.lastSeen, before.lastSeen);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Transport: the in-flight guard, the backoff ladder, the retry gate.
 // ---------------------------------------------------------------------------
+
 
 describe('transport: in-flight guard', () => {
   it('caps concurrency at 1 and releases on success', async () => {
@@ -782,6 +869,18 @@ function toolPart(sessionID: string, status: 'pending' | 'running' | 'error' | '
   };
 }
 
+/** A real `TextPart` update. `extra` can set `synthetic` / `ignored` / `time`. */
+function textPart(sessionID: string, extra: Record<string, unknown> = {}) {
+  return {
+    type: 'message.part.updated',
+    properties: {
+      part: { id: `prt_${sessionID}`, type: 'text', sessionID, messageID: 'msg_1', text: 'hi', ...extra },
+      delta: 'hi',
+    },
+  };
+}
+
+
 async function send(hooks: PluginHooks, event: unknown): Promise<void> {
   await hooks.event({ event });
   await settle();
@@ -846,9 +945,14 @@ describe('plugin: startup', () => {
     const hooks = await startPlugin(client);
 
     // The startup beat goes out green the instant the factory returns -- it does
-    // NOT wait for the seed -- and the seed's own beat then corrects it to red.
+    // NOT wait for the seed -- and the seed's own beat then corrects it.
+    //
+    // The correction is YELLOW, not red: the seed teaches us the status and
+    // nothing else, so there is no evidence of a tool or a text stream. A
+    // busy-but-silent session is exactly "thinking" under the new mapping, and
+    // the point of the seed is only to not report a false green.
     assert.equal(stubs().calls[0].state, 'green', 'the startup beat must not wait for the seed');
-    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'red');
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'yellow');
 
     await hooks.dispose();
   });
@@ -926,21 +1030,23 @@ describe('plugin: heartbeat and error lifetime', () => {
   });
 
   it('clears a stale error after ERROR_TTL_MS', async () => {
-    // The bug: a fatal ApiError is normally the LAST event of a turn, so no
-    // session.idle follows and the yellow stuck until the session was pruned.
+    // An error is RED, and a failing session goes idle immediately afterwards,
+    // so the flag deliberately survives that idle. ERROR_TTL_MS is therefore
+    // the only thing that ever clears a fatal ApiError/ProviderAuthError --
+    // without it the key would sit red for a session that died minutes ago.
     active = installStubs();
     const client = createClientStub();
     const hooks = await startPlugin(client);
 
     await send(hooks, { type: 'session.error', properties: { sessionID: 'ses_1' } });
-    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'yellow');
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'red');
 
     stubs().advance(ERROR_TTL_MS - 1);
     tick();
     await settle();
     assert.equal(
       stubs().calls[stubs().calls.length - 1].state,
-      'yellow',
+      'red',
       'the flag must survive right up to the TTL',
     );
 
@@ -962,13 +1068,13 @@ describe('plugin: heartbeat and error lifetime', () => {
     const hooks = await startPlugin(client);
 
     await send(hooks, toolPart('ses_1', 'error'));
-    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'yellow');
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'red');
 
     await send(hooks, toolPart('ses_1', 'completed'));
     assert.equal(
       stubs().calls[stubs().calls.length - 1].state,
       'green',
-      'a recovered turn must not stay yellow for the rest of the turn',
+      'a recovered turn must not stay red for the rest of the turn',
     );
 
     await hooks.dispose();
@@ -976,13 +1082,14 @@ describe('plugin: heartbeat and error lifetime', () => {
 
   it('warns instead of poisoning every session when an error has no sessionID', async () => {
     // The old `else` branch stamped `error` on all known sessions, and those
-    // sessions never receive a setStatus, so each stayed yellow.
+    // sessions never receive an event that clears the flag, so each stayed
+    // yellow. Under the new mapping the same bug would leave them all RED.
     active = installStubs();
     const client = createClientStub();
     const hooks = await startPlugin(client);
 
     await send(hooks, { type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } });
-    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'red');
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'yellow');
 
     const before = stubs().calls.length;
     await send(hooks, { type: 'session.error', properties: {} });
@@ -993,7 +1100,7 @@ describe('plugin: heartbeat and error lifetime', () => {
     );
     assert.equal(
       stubs().calls[stubs().calls.length - 1].state,
-      'red',
+      'yellow',
       'an unattributed error must not recolour unrelated sessions',
     );
     assert.ok(stubs().calls.length > before);
@@ -1001,6 +1108,389 @@ describe('plugin: heartbeat and error lifetime', () => {
     await hooks.dispose();
   });
 });
+
+// ---------------------------------------------------------------------------
+// The colour mapping itself: the six ordered rules, driven through the REAL
+// event pump rather than hand-built records, so the two halves -- the pure
+// decision function and the state that feeds it -- are covered together.
+// ---------------------------------------------------------------------------
+
+describe('perSession() -- the six ordered rules', () => {
+  function record(overrides: Partial<SessionRecord> = {}): SessionRecord {
+    return {
+      status: 'idle',
+      pending: new Set<string>(),
+      error: false,
+      active: false,
+      lastSeen: 0,
+      ...overrides,
+    };
+  }
+
+  it('rule 1: an error is red, and outranks everything else', () => {
+    assert.equal(perSession(record({ error: true })), 'red');
+    assert.equal(perSession(record({ status: 'busy', error: true })), 'red');
+    assert.equal(perSession(record({ status: 'busy', active: true, error: true })), 'red');
+    // Including a pending prompt: the failure is still the loudest thing.
+    assert.equal(perSession(record({ status: 'busy', pending: new Set(['p1']), error: true })), 'red');
+  });
+
+  it('rule 2: a pending permission is GREEN -- the inversion that matters', () => {
+    // Under the previous mapping a prompt outranked the work and read yellow.
+    // Now a prompt means the turn is blocked on the user, which is the same
+    // at-rest reading as idle.
+    assert.equal(perSession(record({ status: 'busy', pending: new Set(['p1']) })), 'green');
+    // Even with a stale `active` flag still latched.
+    assert.equal(perSession(record({ status: 'busy', active: true, pending: new Set(['p1']) })), 'green');
+  });
+
+  it('rule 3: idle is green, and it is decided BEFORE `active`', () => {
+    assert.equal(perSession(record()), 'green');
+    // A stale tool/text window must never resurrect a finished session.
+    assert.equal(perSession(record({ status: 'idle', active: true })), 'green');
+  });
+
+  it('rule 4: active is red -- a tool running, or text streaming', () => {
+    assert.equal(perSession(record({ status: 'busy', active: true })), 'red');
+    assert.equal(perSession(record({ status: 'retry', active: true })), 'red');
+  });
+
+  it('rule 5: busy or retry with nothing running is yellow (thinking)', () => {
+    assert.equal(perSession(record({ status: 'busy' })), 'yellow');
+    assert.equal(perSession(record({ status: 'retry' })), 'yellow');
+  });
+
+  it('rule 6: the fallthrough is green', () => {
+    assert.equal(perSession(record({ status: 'idle', pending: new Set(['p1', 'p2', 'p3']) })), 'green');
+  });
+
+  it('aggregate: red beats yellow beats green', () => {
+    assert.equal(aggregate(['green', 'yellow']), 'yellow');
+    assert.equal(aggregate(['yellow', 'red']), 'red');
+    assert.equal(aggregate(['red', 'yellow']), 'red');
+    assert.equal(aggregate(['green', 'red', 'yellow', 'red']), 'red');
+    assert.equal(aggregate(['green', 'green']), 'green');
+    assert.equal(aggregate([]), 'green');
+  });
+
+  it('derive: severity max across sessions', () => {
+    const idle = record();
+    const thinking = record({ status: 'busy' });
+    const working = record({ status: 'busy', active: true });
+    const failed = record({ error: true });
+
+    assert.equal(derive([idle, idle]), 'green');
+    assert.equal(derive([idle, thinking]), 'yellow');
+    assert.equal(derive([thinking, working]), 'red');
+    assert.equal(derive([working, failed]), 'red');
+    assert.equal(derive([idle, thinking, failed]), 'red');
+    assert.equal(derive([]), 'green');
+  });
+});
+
+describe('plugin: the colour mapping end to end', () => {
+  it('idle, nothing pending, not active -> green', async () => {
+    active = installStubs();
+    const client = createClientStub();
+    const hooks = await startPlugin(client);
+
+    await send(hooks, {
+      type: 'session.status',
+      properties: { sessionID: 'ses_1', status: { type: 'idle' } },
+    });
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'green');
+
+    await hooks.dispose();
+  });
+
+  it('a pending permission on a BUSY session is green, not yellow', async () => {
+    // The inversion, asserted through the real pump: the prompt outranks the
+    // busy status, and the answer is green because "waiting on you" is at rest.
+    active = installStubs();
+    const client = createClientStub();
+    const hooks = await startPlugin(client);
+
+    await send(hooks, { type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } });
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'yellow', 'sanity: busy alone is yellow');
+
+    await send(hooks, {
+      type: 'permission.updated',
+      properties: { id: 'perm-1', sessionID: 'ses_1', type: 'bash', title: 'rm -rf /' },
+    });
+    assert.equal(
+      stubs().calls[stubs().calls.length - 1].state,
+      'green',
+      'a pending permission must read as at rest',
+    );
+
+    // ...and it goes back to yellow the moment it is answered.
+    await send(hooks, {
+      type: 'permission.replied',
+      properties: { sessionID: 'ses_1', permissionID: 'perm-1', response: 'once' },
+    });
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'yellow');
+
+    await hooks.dispose();
+  });
+
+  it('a pending permission survives the idle that parks the turn', async () => {
+    // OpenCode emits `session.idle` while a prompt waits, so the prompt has to
+    // outlive it -- otherwise the light would claim "nothing is waiting on you"
+    // at the exact moment you are being asked a question.
+    //
+    // Proof that is observable through the colour: once the turn picks back up
+    // the session reads GREEN if and only if the prompt is still recorded. If
+    // the idle transition had dropped it, step 3 would be yellow too.
+    active = installStubs();
+    const client = createClientStub();
+    const hooks = await startPlugin(client);
+
+    await send(hooks, {
+      type: 'permission.updated',
+      properties: { id: 'perm-1', sessionID: 'ses_1', type: 'bash', title: 'deploy' },
+    });
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'green');
+
+    await send(hooks, { type: 'session.idle', properties: { sessionID: 'ses_1' } });
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'green');
+
+    await send(hooks, { type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } });
+    assert.equal(
+      stubs().calls[stubs().calls.length - 1].state,
+      'green',
+      'the prompt must still be recorded, so the resumed turn reads as waiting on you',
+    );
+
+    await send(hooks, {
+      type: 'permission.replied',
+      properties: { sessionID: 'ses_1', permissionID: 'perm-1', response: 'once' },
+    });
+    assert.equal(
+      stubs().calls[stubs().calls.length - 1].state,
+      'yellow',
+      'once answered, nothing blocks on you any more, so the turn reads as thinking',
+    );
+
+    await hooks.dispose();
+  });
+
+  it('busy with no tool and no text is yellow', async () => {
+    active = installStubs();
+    const client = createClientStub();
+    const hooks = await startPlugin(client);
+
+    await send(hooks, { type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } });
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'yellow');
+
+    // `retry` is a busy variant: a provider is retrying, no tokens, no tool.
+    await send(hooks, { type: 'session.status', properties: { sessionID: 'ses_2', status: { type: 'busy' } } });
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'yellow');
+
+    await hooks.dispose();
+  });
+
+  it('a running tool is red, and NO TTL ever downgrades it to thinking', async () => {
+    // The whole reason `toolRunning` is separate from `textActive`: a tool
+    // like `sleep 60` emits no events while it runs, so a time-based expiry
+    // would call a working agent idle for most of a minute.
+    active = installStubs();
+    const client = createClientStub();
+    const hooks = await startPlugin(client);
+
+    await send(hooks, toolPart('ses_1', 'running'));
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'red');
+
+    // Well past both ACTIVITY_TTL_MS and a couple of heartbeats, with no
+    // further events at all.
+    stubs().advance(ACTIVITY_TTL_MS * 6);
+    tick();
+    await settle();
+    assert.equal(
+      stubs().calls[stubs().calls.length - 1].state,
+      'red',
+      'a running tool must not decay to yellow just because it is quiet',
+    );
+
+    // The tool's own completion is what clears it.
+    await send(hooks, toolPart('ses_1', 'completed'));
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'green');
+
+    await hooks.dispose();
+  });
+
+  it('streaming text is red, then falls back to yellow after ACTIVITY_TTL_MS', async () => {
+    active = installStubs();
+    const client = createClientStub();
+    const hooks = await startPlugin(client);
+
+    await send(hooks, { type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } });
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'yellow');
+
+    await send(hooks, textPart('ses_1'));
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'red', 'text streaming is red');
+
+    stubs().advance(ACTIVITY_TTL_MS - 1);
+    tick();
+    await settle();
+    assert.equal(
+      stubs().calls[stubs().calls.length - 1].state,
+      'red',
+      'the activity window must stay open right up to the TTL',
+    );
+
+    // The model has gone quiet mid-turn: it is thinking, not working.
+    stubs().advance(2);
+    tick();
+    await settle();
+    assert.equal(
+      stubs().calls[stubs().calls.length - 1].state,
+      'yellow',
+      'a busy session with no output past ACTIVITY_TTL_MS reads as thinking',
+    );
+
+    // ...and a further text part re-arms it.
+    await send(hooks, textPart('ses_1'));
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'red');
+
+    await hooks.dispose();
+  });
+
+  it('ignores synthetic and ignored text parts', async () => {
+    // Those parts are injected by the SDK / the client, not written by the
+    // model. Counting them would paint the key red for a turn that is only
+    // narrating.
+    active = installStubs();
+    const client = createClientStub();
+    const hooks = await startPlugin(client);
+
+    await send(hooks, { type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } });
+    await send(hooks, textPart('ses_1', { synthetic: true }));
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'yellow');
+
+    await send(hooks, textPart('ses_1', { ignored: true }));
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'yellow');
+
+    await hooks.dispose();
+  });
+
+  it('an error is red, and SURVIVES the idle that follows a failure', async () => {
+    // The deliberate change: `session.idle` no longer clears the error flag.
+    // A failure ends the turn, so the idle arrives immediately afterwards; if
+    // it cleared the flag, red would be invisible for exactly the failures
+    // that matter most.
+    active = installStubs();
+    const client = createClientStub();
+    const hooks = await startPlugin(client);
+
+    await send(hooks, { type: 'session.error', properties: { sessionID: 'ses_1' } });
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'red');
+
+    await send(hooks, { type: 'session.idle', properties: { sessionID: 'ses_1' } });
+    assert.equal(
+      stubs().calls[stubs().calls.length - 1].state,
+      'red',
+      'an idle transition must not paper over a failure',
+    );
+
+    // A pending prompt is green, but the error still outranks it.
+    await send(hooks, {
+      type: 'permission.updated',
+      properties: { id: 'perm-1', sessionID: 'ses_1', type: 'bash', title: 'rm' },
+    });
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'red');
+
+    // Only ERROR_TTL_MS clears it.
+    stubs().advance(ERROR_TTL_MS + 1);
+    tick();
+    await settle();
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'green');
+
+    await hooks.dispose();
+  });
+
+  it('a text part cannot resurrect an idle session', async () => {
+    // Rule 3 is checked before rule 4, so a part that arrives after the turn
+    // is over cannot paint the key red for a finished session.
+    active = installStubs();
+    const client = createClientStub();
+    const hooks = await startPlugin(client);
+
+    await send(hooks, textPart('ses_1'));
+    await send(hooks, { type: 'session.idle', properties: { sessionID: 'ses_1' } });
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'green');
+
+    // Even a fresh text part, with the session still idle.
+    await send(hooks, textPart('ses_1'));
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'green');
+
+    await hooks.dispose();
+  });
+
+  it('aggregate: one red session outranks a yellow one on the same deck', async () => {
+    active = installStubs();
+    const client = createClientStub();
+    const hooks = await startPlugin(client);
+
+    await send(hooks, { type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } });
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'yellow');
+
+    await send(hooks, toolPart('ses_2', 'running'));
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'red');
+
+    // The first session is still thinking, but red wins.
+    stubs().advance(ACTIVITY_TTL_MS + 1);
+    tick();
+    await settle();
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'red');
+
+    // Both quiet again -> the deck drops back to yellow, not to green.
+    await send(hooks, toolPart('ses_2', 'completed'));
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'yellow');
+
+    // ...and to green once nothing is left.
+    await send(hooks, { type: 'session.idle', properties: { sessionID: 'ses_1' } });
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'green');
+
+    await hooks.dispose();
+  });
+
+  it('session.deleted drops every per-session signal', async () => {
+    active = installStubs();
+    const client = createClientStub();
+    const hooks = await startPlugin(client);
+
+    await send(hooks, toolPart('ses_1', 'running'));
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'red');
+
+    await send(hooks, { type: 'session.error', properties: { sessionID: 'ses_1' } });
+    await send(hooks, textPart('ses_1'));
+    await send(hooks, {
+      type: 'permission.updated',
+      properties: { id: 'perm-1', sessionID: 'ses_1', type: 'bash', title: 'rm' },
+    });
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'red');
+
+    await send(hooks, {
+      type: 'session.deleted',
+      properties: { info: { id: 'ses_1' } },
+    });
+    assert.equal(
+      stubs().calls[stubs().calls.length - 1].state,
+      'green',
+      'a deleted session must leave nothing behind -- not a red from the error, the tool or the text',
+    );
+
+    // The error flag really is gone, not just outranked: nothing ages it out
+    // early either.
+    stubs().advance(ERROR_TTL_MS + 1);
+    tick();
+    await settle();
+    assert.equal(stubs().calls[stubs().calls.length - 1].state, 'green');
+
+    await hooks.dispose();
+  });
+});
+
 
 describe('plugin: dispose ordering', () => {
   it('clears the interval BEFORE the final green, and drains first', async () => {
@@ -1012,14 +1502,16 @@ describe('plugin: dispose ordering', () => {
     await settle();
     assert.deepEqual(stubs().order, ['setInterval', 'post:green']);
 
-    // Now a red goes out and is held on the wire.
+    // Now a red goes out and is held on the wire. A TOOL part, not a bare
+    // `session.status`: under the new mapping a busy session with no tool and
+    // no text is yellow (thinking), and this test is about the red-then-green
+    // drain ordering, so it needs a genuine red.
     const gate = deferred();
     stubs().setRespond(() => gate.promise);
-    await hooks.event({
-      event: { type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } },
-    });
+    await hooks.event({ event: toolPart('ses_1', 'running') });
     await settle();
     assert.equal(stubs().order[stubs().order.length - 1], 'post:red');
+
 
     let disposed = false;
     const disposing = hooks.dispose().then(() => {
