@@ -1,0 +1,36 @@
+name: Testing, Validation
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: "ci-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Install Node.js and pnpm
+      uses: pnpm/setup@v2
+      with:
+        version: 11.21.0
+        install: false
+    
+    - name: Install dependencies
+      run: pnpm ci
+
+    - name: Run typechecking
+      run: pnpm tsc
+
+    - name: Run tests
+      run: pnpm test

@@ -1,7 +1,8 @@
 {
   "name": "@tim0-12432/opencode-traffic-lights-streamdeck",
   "version": "1.0.0",
-  "private": true,
+  "private": false,
+  "description": "OpenCode agent status mirrored to an Elgato Stream Deck key.",
   "license": "MIT",
   "type": "module",
   "files": [
