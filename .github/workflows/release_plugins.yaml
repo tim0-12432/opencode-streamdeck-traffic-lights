@@ -1,0 +1,124 @@
+name: Release Plugins
+on:
+  push:
+    tags:
+      - "v*.*.*"
+jobs:
+  set-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+            VERSION="${BASH_REMATCH[1]}"
+          else
+            VERSION="${VERSION%%-*}"  # Remove everything after '-'
+            VERSION="${VERSION%%.*}"  # Remove everything after first '.'
+          fi
+          echo "Extracted version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Set package version
+        run: |
+          pnpm version ${{ steps.get_version.outputs.version }} --no-git-tag-version --no-git-checks
+
+      - name: Commit version changes
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "noreply.github@github.local"
+          git add opencode/package.json package.json streamdeck/package.json
+          git commit -m "Set version to ${{ steps.get_version.outputs.version }}" || echo "No changes to commit"
+
+  build-opencode:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js and pnpm
+        uses: pnpm/setup@v2
+        with:
+          version: 11.21.0
+          install: false
+      
+      - name: Install dependencies
+        run: pnpm --filter=opencode ci
+
+      - name: Build package
+        run: pnpm --filter=opencode build
+
+      - name: Publish package to NPM
+        run: pnpm --filter=opencode publish --provenance --access public --no-git-checks
+
+  build-streamdeck:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js and pnpm
+        uses: pnpm/setup@v2
+        with:
+          version: 11.21.0
+          install: false
+      
+      - name: Install dependencies
+        run: pnpm --filter=streamdeck ci
+
+      - name: Build package
+        run: pnpm --filter=streamdeck build
+
+      - name: Publish package to NPM
+        run: pnpm --filter=streamdeck publish --provenance --access public --no-git-checks
+
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Get version from package
+        id: get_version
+        run: |
+          VERSION="$(jq -r '.version' package.json)"
+          echo "Extracted version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Release package
+        uses: softprops/action-gh-release@v3
+        with:
+          body: |
+            **Usage**:
+            ```bash
+            opencode plugin add @tim0-12432/opencode-traffic-lights-opencode
+            ```
+
+            **Official StreamDeck Marketplace**:
+            - https://marketplace.elgato.com/product/opencode-traffic-lights-streamdeck-65b13b96-043e-4fd7-9cc6-78360a6a648c
+
+          generate_release_notes: true
+          make_latest: true
+    
