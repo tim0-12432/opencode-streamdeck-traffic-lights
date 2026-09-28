@@ -1,0 +1,51 @@
+name: Release StreamDeck Plugin
+on:
+  push:
+    tags:
+      - "v*.*.*"
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    defaults:
+      run:
+        working-directory: ./streamdeck
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js and pnpm
+        uses: pnpm/setup@v2
+        with:
+          version: 11.21.0
+          install: false
+      
+      - name: Install dependencies
+        run: pnpm ci
+
+      - name: Build package
+        run: pnpm build
+
+      - name: Get version from package
+        id: get_version
+        run: |
+          VERSION="$(jq -r '.version' package.json)"
+          echo "Extracted version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Publish package to NPM
+        run: pnpm publish --provenance --access public --no-git-checks
+        
+      - name: Release package
+        uses: softprops/action-gh-release@v3
+        with:
+          body: |
+            **Official StreamDeck Marketplace**:
+            - https://marketplace.elgato.com/product/opencode-traffic-lights-streamdeck-65b13b96-043e-4fd7-9cc6-78360a6a648c
+
+          generate_release_notes: true
+          make_latest: true

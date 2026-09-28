@@ -1,0 +1,50 @@
+name: Release OpenCode Plugin
+on:
+  push:
+    tags:
+      - "v*.*.*"
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    defaults:
+      run:
+        working-directory: ./opencode
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js and pnpm
+        uses: pnpm/setup@v2
+        with:
+          version: 11.21.0
+          install: false
+      
+      - name: Install dependencies
+        run: pnpm ci
+
+      - name: Build package
+        run: pnpm build
+
+      - name: Get version from package
+        id: get_version
+        run: |
+          VERSION="$(jq -r '.version' package.json)"
+          echo "Extracted version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Release package
+        uses: softprops/action-gh-release@v3
+        with:
+          body: |
+            **Usage**:
+            ```bash
+            opencode plugin add @tim0-12432/opencode-traffic-lights-opencode
+            ```
+
+          generate_release_notes: true
+          make_latest: true
