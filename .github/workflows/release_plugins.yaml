@@ -14,6 +14,13 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Validate branch
+        run: |
+          if [[ "${GITHUB_REF#refs/heads/}" != "main" ]]; then
+            echo "This workflow only runs on the main branch."
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v7
 
@@ -38,20 +45,48 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Set package version
+        env:
+          VERSION: ${{ steps.get_version.outputs.version }}
         run: |
-          pnpm version ${{ steps.get_version.outputs.version }} -r --no-git-tag-version --no-git-checks
+          set -euo pipefail
+          MANIFEST="streamdeck/com.tim0-12432.opencode-traffic-lights.sdPlugin/manifest.json"
+
+          pnpm version "$VERSION" -r --no-git-tag-version --no-git-checks
+
+          # Stream Deck manifest Version is 4-part (major.minor.patch.build); build stays 0.
+          # Targeted single-line replacement so tab indentation and the rest of the file stay byte-identical.
+          node -e '
+          const fs = require("fs");
+          const p = process.argv[1];
+          const next = process.argv[2];
+          const lines = fs.readFileSync(p, "utf8").split("\n");
+          // "Version" also appears nested under Nodejs; the top-level key is the least-indented one.
+          const re = /^([ \t]*)"Version"[ \t]*:[ \t]*"[^"]*"/;
+          const hits = [];
+          lines.forEach((l, i) => { const m = l.match(re); if (m) hits.push({ i, indent: m[1].length }); });
+          if (hits.length === 0) { console.error("FAIL: no Version line in " + p); process.exit(1); }
+          const min = Math.min(...hits.map((h) => h.indent));
+          const top = hits.filter((h) => h.indent === min);
+          if (top.length !== 1) { console.error("FAIL: ambiguous top-level Version in " + p); process.exit(1); }
+          const i = top[0].i;
+          const replaced = lines[i].replace(re, (m, ind) => ind + "\"Version\": \"" + next + ".0\"");
+          if (replaced === lines[i]) { console.error("FAIL: Version line not rewritten: " + lines[i]); process.exit(1); }
+          lines[i] = replaced;
+          fs.writeFileSync(p, lines.join("\n"));
+          console.log("rewrote line " + (i + 1) + ": " + next + ".0");
+          ' "$MANIFEST" "$VERSION"
 
       - name: Commit version changes
         run: |
-          git push -d origin "refs/tags/${GITHUB_REF#refs/tags/}" || echo "No tag to delete"
+          git push -d origin "refs/tags/${GITHUB_REF#refs/tags/}" -f || echo "No tag to delete"
           git tag -d "${GITHUB_REF#refs/tags/}" || echo "No tag to delete"
           git config user.name "GitHub Actions"
           git config user.email "noreply.github@github.local"
-          git add opencode/package.json package.json streamdeck/package.json
+          git add package.json opencode/package.json streamdeck/package.json streamdeck/com.tim0-12432.opencode-traffic-lights.sdPlugin/manifest.json
           git commit -m "Set version to ${{ steps.get_version.outputs.version }}" || echo "No changes to commit"
-          git push origin main || echo "No changes to push"
+          git push origin main -f || echo "No changes to push"
           git tag "${GITHUB_REF#refs/tags/}" -m "Release version ${{ steps.get_version.outputs.version }}" || echo "No tag to create"
-          git push origin "${GITHUB_REF#refs/tags/}" || echo "No tag to push"
+          git push origin "${GITHUB_REF#refs/tags/}" -f || echo "No tag to push"
 
   build-opencode:
     runs-on: ubuntu-latest
@@ -64,6 +99,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: main
 
       - name: Install Node.js and pnpm
         uses: pnpm/setup@v2
@@ -91,6 +127,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: main
 
       - name: Install Node.js and pnpm
         uses: pnpm/setup@v2
@@ -120,6 +157,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: main
 
       - name: Get version from package
         id: get_version
