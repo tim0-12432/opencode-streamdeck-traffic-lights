@@ -1,5 +1,5 @@
 {
-  "name": "@tim0-12432/opencode-traffic-lights-opencode",
+  "name": "@tim0-12432/opencode-streamdeck-traffic-lights-opencode",
   "version": "1.0.0",
   "private": false,
   "description": "OpenCode plugin that mirrors agent status to a Stream Deck key.",
@@ -8,12 +8,12 @@
   "author": "tim0-12432",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tim0-12432/opencode-traffic-lights.git",
+    "url": "git+https://github.com/tim0-12432/opencode-streamdeck-traffic-lights.git",
     "directory": "opencode"
   },
-  "homepage": "https://github.com/tim0-12432/opencode-traffic-lights#readme",
+  "homepage": "https://github.com/tim0-12432/opencode-streamdeck-traffic-lights#readme",
   "bugs": {
-    "url": "https://github.com/tim0-12432/opencode-traffic-lights/issues"
+    "url": "https://github.com/tim0-12432/opencode-streamdeck-traffic-lights/issues"
   },
   "files": [
     "dist"

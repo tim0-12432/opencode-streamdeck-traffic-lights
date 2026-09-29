@@ -71,7 +71,7 @@ jobs:
           VERSION: ${{ steps.get_version.outputs.version }}
         run: |
           set -euo pipefail
-          MANIFEST="streamdeck/com.tim0-12432.opencode-traffic-lights.sdPlugin/manifest.json"
+          MANIFEST="streamdeck/com.tim0-12432.opencode-streamdeck-traffic-lights.sdPlugin/manifest.json"
 
           pnpm version "$VERSION" -r --no-git-tag-version --no-git-checks
 
@@ -94,7 +94,7 @@ jobs:
           TAG="${GITHUB_REF#refs/tags/}"
           git config user.name "GitHub Actions"
           git config user.email "noreply.github@github.local"
-          git add package.json opencode/package.json streamdeck/package.json streamdeck/com.tim0-12432.opencode-traffic-lights.sdPlugin/manifest.json
+          git add package.json opencode/package.json streamdeck/package.json streamdeck/com.tim0-12432.opencode-streamdeck-traffic-lights.sdPlugin/manifest.json
           if git diff --cached --quiet; then
             echo "Nothing to commit: the manifests already carried ${TAG#v}"
           else
@@ -179,7 +179,7 @@ jobs:
         run: pnpm --filter ./streamdeck validate
 
       - name: Pack the .sdPlugin distributable
-        run: pnpm --filter ./streamdeck exec streamdeck pack com.tim0-12432.opencode-traffic-lights.sdPlugin --output . --force
+        run: pnpm --filter ./streamdeck exec streamdeck pack com.tim0-12432.opencode-streamdeck-traffic-lights.sdPlugin --output . --force
 
       - name: Show the packed bundle
         run: ls -l streamdeck/*.streamDeckPlugin
@@ -200,6 +200,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      attestations: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -224,8 +225,7 @@ jobs:
         id: attest
         uses: actions/attest@v4
         with:
-          subject-path: |
-            release-assets/*.streamDeckPlugin
+          subject-path: release-assets/*.streamDeckPlugin
 
       - name: Release package
         if: ${{ !env.DRY_RUN }}
@@ -237,7 +237,7 @@ jobs:
             Add the OpenCode plugin to your project with:
 
             ```bash
-            opencode plugin @tim0-12432/opencode-traffic-lights-opencode
+            opencode plugin @tim0-12432/opencode-streamdeck-traffic-lights-opencode
             ```
 
             or download the plugin directly and point OpenCode to it:
@@ -253,7 +253,7 @@ jobs:
 
             ## Stream Deck plugin
 
-            Download and open `com.tim0-12432.opencode-traffic-lights.streamDeckPlugin`
+            Download and open `com.tim0-12432.opencode-streamdeck-traffic-lights.streamDeckPlugin`
             from the assets below, or install it from the official marketplace:
 
             - https://marketplace.elgato.com/product/opencode-traffic-lights-streamdeck-65b13b96-043e-4fd7-9cc6-78360a6a648c

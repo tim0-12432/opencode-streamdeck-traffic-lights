@@ -1,4 +1,4 @@
-# OpenCode Traffic Lights
+# OpenCode StreamDeck Traffic Lights
 
 Mirror your OpenCode agent's status to a single Elgato Stream Deck key, so you
 can tell from across the room whether the agent needs you.
@@ -35,7 +35,7 @@ exactly the failures that matter most.
 - **Stream Deck 7.1+** — the manifest's `Software.MinimumVersion`. Windows 10+ or
   macOS 12+.
 - The repo, from the `tim0-12432` scope:
-  <https://github.com/tim0-12432/opencode-traffic-lights>
+  <https://github.com/tim0-12432/opencode-streamdeck-traffic-lights>
 
 ## Install & build
 
@@ -48,7 +48,7 @@ pnpm validate
 
 - `pnpm install` — installs the workspace (root, `opencode/`, `streamdeck/`).
 - `pnpm build` — bundles the Stream Deck plugin to
-  `streamdeck/com.tim0-12432.opencode-traffic-lights.sdPlugin/bin/plugin.js`.
+  `streamdeck/com.tim0-12432.opencode-streamdeck-traffic-lights.sdPlugin/bin/plugin.js`.
   **This step is mandatory on a fresh clone.** `bin/` is gitignored, so the
   bundle is not in the repo, and the Stream Deck app will not load the plugin
   without it — a missing `CodePath` is a plugin that simply never appears.
@@ -60,6 +60,15 @@ pnpm validate
 You only need `pnpm build` + `pnpm relink` again whenever you change something in
 `streamdeck/`. Changes in `opencode/` need no build at all (see below).
 
+## Upgrading
+
+The plugin UUID changed from `com.tim0-12432.opencode-traffic-lights` to
+`com.tim0-12432.opencode-streamdeck-traffic-lights`. The Stream Deck app keys the
+**Instance** setting to the action UUID, so existing keys lose their configuration
+on upgrade — re-add them and set **Instance** again. `pnpm relink` unlinks the old
+UUID first, so the legacy copy is dropped automatically and the new one does not
+collide on `127.0.0.1:8765`.
+
 ## Building the distributable
 
 `streamdeck/` is **not** an npm package and is marked `"private": true` for that
@@ -70,10 +79,10 @@ extracted. The distributable is a `.streamDeckPlugin` bundle, produced by
 
 ```sh
 pnpm build
-pnpm --filter ./streamdeck exec streamdeck pack com.tim0-12432.opencode-traffic-lights.sdPlugin --output . --force
+pnpm --filter ./streamdeck exec streamdeck pack com.tim0-12432.opencode-streamdeck-traffic-lights.sdPlugin --output . --force
 ```
 
-That writes `streamdeck/com.tim0-12432.opencode-traffic-lights.streamDeckPlugin`,
+That writes `streamdeck/com.tim0-12432.opencode-streamdeck-traffic-lights.streamDeckPlugin`,
 a zip whose single top-level folder is the `.sdPlugin` directory. Run
 `pnpm validate` first; `pack` validates too and refuses to package a manifest it
 rejects. The bundle is rebuilt on every release and attached to the GitHub
@@ -118,13 +127,13 @@ bun link /absolute/path/to/opencode-traffic-lights/opencode
 
 ```json
 {
-  "plugin": ["@tim0-12432/opencode-traffic-lights-opencode"]
+  "plugin": ["@tim0-12432/opencode-streamdeck-traffic-lights-opencode"]
 }
 ```
 
 **Link it, do not copy it.** A `file:` dependency — which is what `bun add
 file:/…/opencode` creates — is *copied* into
-`node_modules/@tim0-12432/opencode-traffic-lights-opencode/`, and from there
+`node_modules/@tim0-12432/opencode-streamdeck-traffic-lights-opencode/`, and from there
 the plugin's `import … from '../../../shared/contract.js'` would resolve outside
 the package entirely, to a `shared/contract` that does not exist. The plugin
 then fails to load with a module-not-found error. `bun link` installs a
@@ -266,7 +275,7 @@ move the deck side too, or nothing will connect).
     will tell you.
 - **The key is stuck on a colour.** It self-heals: within ~7 s of OpenCode
   going silent the deck forces the key green. If it does not, read
-  `streamdeck/com.tim0-12432.opencode-traffic-lights.sdPlugin/logs/` — the plugin
+  `streamdeck/com.tim0-12432.opencode-streamdeck-traffic-lights.sdPlugin/logs/` — the plugin
   logs every missed heartbeat, every untracked instance, and every state it
   fails to apply there. A routine successful state application is not logged.
 - **`Port 8765 is already in use`.** Another copy of the plugin (or another
@@ -282,10 +291,10 @@ move the deck side too, or nothing will connect).
   question. If you expected some other colour, or the key is not behaving at
   all, make sure OpenCode is actually running the plugin. On a healthy start
   the plugin emits exactly one `info` line, so grep the OpenCode log for
-  `[opencode-traffic-lights]` and look for:
+  `[opencode-streamdeck-traffic-lights]` and look for:
 
   ```
-  [opencode-traffic-lights] traffic light active -> http://127.0.0.1:8765/state as instance 1
+  [opencode-streamdeck-traffic-lights] traffic light active -> http://127.0.0.1:8765/state as instance 1
   ```
 
   If that line is there, the plugin is loaded and the problem is on the deck
@@ -314,7 +323,7 @@ streamdeck/
   test/
     tsconfig.json
     contract.test.ts              wire-contract, HTTP, and repaint-ordering tests
-  com.tim0-12432.opencode-traffic-lights.sdPlugin/
+  com.tim0-12432.opencode-streamdeck-traffic-lights.sdPlugin/
     manifest.json                 plugin manifest (validator input)
     ui/status.html                property inspector
     imgs/                         action + plugin icons

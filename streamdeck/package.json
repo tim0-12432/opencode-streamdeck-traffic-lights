@@ -1,31 +1,31 @@
 {
-  "name": "@tim0-12432/opencode-traffic-lights-streamdeck",
+  "name": "@tim0-12432/opencode-streamdeck-traffic-lights-streamdeck",
   "version": "1.0.0",
   "private": true,
   "description": "OpenCode agent status mirrored to an Elgato Stream Deck key.",
   "license": "MIT",
   "type": "module",
   "author": "tim0-12432",
-  "homepage": "https://github.com/tim0-12432/opencode-traffic-lights#readme",
+  "homepage": "https://github.com/tim0-12432/opencode-streamdeck-traffic-lights#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tim0-12432/opencode-traffic-lights.git",
+    "url": "git+https://github.com/tim0-12432/opencode-streamdeck-traffic-lights.git",
     "directory": "streamdeck"
   },
   "bugs": {
-    "url": "https://github.com/tim0-12432/opencode-traffic-lights/issues"
+    "url": "https://github.com/tim0-12432/opencode-streamdeck-traffic-lights/issues"
   },
   "files": [
-    "com.tim0-12432.opencode-traffic-lights.sdPlugin"
+    "com.tim0-12432.opencode-streamdeck-traffic-lights.sdPlugin"
   ],
   "scripts": {
     "images": "node scripts/generate-images.mjs",
     "build": "node scripts/generate-images.mjs && rollup -c",
-    "watch": "node scripts/generate-images.mjs && rollup -c -w --watch.onEnd=\"streamdeck restart com.tim0-12432.opencode-traffic-lights\"",
+    "watch": "node scripts/generate-images.mjs && rollup -c -w --watch.onEnd=\"streamdeck restart com.tim0-12432.opencode-streamdeck-traffic-lights\"",
     "tsc": "tsc --noEmit",
     "test": "tsc -p test/tsconfig.json && node --test --test-reporter=spec test/.build/streamdeck/test/contract.test.js",
-    "validate": "streamdeck validate com.tim0-12432.opencode-traffic-lights.sdPlugin",
-    "relink": "streamdeck unlink com.tim0-12432.opencode-traffic-lights && streamdeck link com.tim0-12432.opencode-traffic-lights.sdPlugin"
+    "validate": "streamdeck validate com.tim0-12432.opencode-streamdeck-traffic-lights.sdPlugin",
+    "relink": "node scripts/relink.mjs"
   },
   "dependencies": {
     "@elgato/streamdeck": "3.0.0"

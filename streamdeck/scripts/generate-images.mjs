@@ -51,7 +51,7 @@ import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const PLUGIN_ROOT = path.resolve(HERE, '..', 'com.tim0-12432.opencode-traffic-lights.sdPlugin');
+const PLUGIN_ROOT = path.resolve(HERE, '..', 'com.tim0-12432.opencode-streamdeck-traffic-lights.sdPlugin');
 
 // ---------------------------------------------------------------------------
 // CRC32 (PNG chunk checksum). Table-driven, no dependencies.

@@ -7,12 +7,12 @@ import {
 import type { State, StatePayload } from '../../../shared/contract.js';
 
 /** Log service name used for every `client.app.log` entry we emit. */
-export const SERVICE = 'opencode-traffic-lights';
+export const SERVICE = 'opencode-streamdeck-traffic-lights';
 
 /**
  * The one place the log prefix is built. `streamdeck-status.ts` calls this too,
  * so a line written by the plugin and a line written by the transport are
- * byte-identical -- which is what makes `grep '\[opencode-traffic-lights\]'`
+ * byte-identical -- which is what makes `grep '\[opencode-streamdeck-traffic-lights\]'`
  * a reliable "is the plugin loaded?" check.
  */
 export function formatLine(message: string): string {

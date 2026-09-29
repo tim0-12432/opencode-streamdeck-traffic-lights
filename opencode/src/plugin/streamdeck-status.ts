@@ -24,6 +24,17 @@ import type { SessionRecord, SessionStatusKind } from './state.js';
 const DISPOSE_FLUSH_MS = 300;
 
 /**
+ * Stamped into `record.messages` for every session the boot seed teaches us
+ * about. The seed reports a session that EXISTS and is mid-turn, which by
+ * definition means it has messages -- and `messages` is precisely the signal
+ * `perSession`'s "no messages yet -> green" rule keys off. Without this stamp a
+ * restart would report green for the very sessions the seed exists to prove are
+ * busy, which is the one outcome the seed must never produce. It is a marker,
+ * never read as an id.
+ */
+const SEEDED_MESSAGE_ID = 'seed:session-status';
+
+/**
  * A live session as the event pump sees it: the pure `SessionRecord` the
  * decision function consumes, plus the two raw signals that `active` is
  * derived from.
@@ -49,6 +60,14 @@ type LiveSession = SessionRecord & {
   textActive: boolean;
   /** When `textActive` was last stamped, ms. Zero when `textActive` is false. */
   textAt: number;
+  /**
+   * Marks every message id this process has seen for the session, and whether
+   * any of them was an ASSISTANT message. Both are the producer's job: only it
+   * sees the `message.updated` events and the `messageID` on every part.
+   * `perSession` reads them and never writes them.
+   */
+  messages: Set<string>;
+  hasAssistantMessage: boolean;
 };
 
 export const StreamDeckStatus: Plugin = async ({ client }) => {
@@ -110,6 +129,8 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
       toolRunning: false,
       textActive: false,
       textAt: 0,
+      messages: new Set<string>(),
+      hasAssistantMessage: false,
       // DERIVED, never stored. The two signals above are the only truth.
       get active(): boolean {
         return this.toolRunning || this.textActive;
@@ -131,6 +152,14 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
   function clearPending(sessionID: string, permissionID: string): void {
     sessions.get(sessionID)?.pending.delete(permissionID);
     pendingAt.delete(permissionID);
+  }
+
+  function markMessage(sessionID: string, messageID: string, role: string): void {
+    if (messageID === '') return;
+    get(sessionID).messages.add(messageID);
+    if (role === 'assistant') {
+      get(sessionID).hasAssistantMessage = true;
+    }
   }
 
   function markError(sessionID: string): void {
@@ -234,8 +263,33 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
   }
 
   // A thunk, so the O(sessions) derivation is only paid for a beat that is
-  // actually going to be sent. `beat()` is called on every OpenCode event.
+  // actually going to be sent. Three callers: the coalescing timer below, the
+  // `setInterval` sweep, and the one synchronous startup beat.
   const beat = () => transport.beat(() => derive(sessions.values()));
+
+  // Burst coalescing, parity with the reference implementation. A single turn
+  // emits a long run of `message.part.updated` events (one per token delta for
+  // text, one per tool transition); without coalescing each one used to run a
+  // full derivation. The reference does exactly the same thing -- clear any
+  // pending timer, arm a fresh zero-delay one -- and the timer is what makes a
+  // burst produce ONE update instead of a burst of them.
+  //
+  // The zero delay is what keeps the beat prompt: the callback is queued as a
+  // timer, so it runs on the next turn of the event loop, immediately after the
+  // synchronous `event` hook returns and well inside HEARTBEAT_MS. Only the
+  // EVENTS and the `permission.ask` hook are coalesced; the `setInterval` below
+  // still calls `beat()` directly, because a sweep is not a burst.
+  let coalesceTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function scheduleBeat(): void {
+    if (coalesceTimer !== undefined) clearTimeout(coalesceTimer);
+    coalesceTimer = setTimeout(() => {
+      coalesceTimer = undefined;
+      beat();
+    }, 0);
+    // Never hold the opencode process open.
+    coalesceTimer.unref();
+  }
 
   const timer = setInterval(() => {
     expire();
@@ -248,11 +302,15 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
   // The one INFO line, emitted SYNCHRONOUSLY -- before anything that could
   // block. `log()`'s only other callers are the warning paths, so on a healthy
   // install this is the only line the README's
-  // `grep '\[opencode-traffic-lights\]'` check can find, and it must not depend
+  // `grep '\[opencode-streamdeck-traffic-lights\]'` check can find, and it must not depend
   // on the seed below ever settling.
   const url = stateUrl(host, port);
   log('info', `traffic light active -> ${url} as instance ${resolvedInstance}`);
 
+  // The FIRST beat is issued SYNCHRONOUSLY, not on the coalescing timer: the
+  // plugin has already made OpenCode wait for this factory, and the deck should
+  // learn "green, and the plugin is alive" without another turn of the event
+  // loop. Every beat after this one is coalesced.
   beat();
 
   // Seed from the server so a restart does not report green while a session is
@@ -286,7 +344,13 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
         seedError = describeSeedError(error);
       } else if (data) {
         for (const [sessionID, status] of Object.entries(data)) {
-          get(sessionID).status = status.type;
+          const record = get(sessionID);
+          record.status = status.type;
+          // The server told us this session is mid-turn, so it necessarily has
+          // messages. Stamping one keeps the "no messages -> green" parity
+          // rule from overriding the very status we just learned -- see
+          // SEEDED_MESSAGE_ID.
+          record.messages.add(SEEDED_MESSAGE_ID);
           seeded += 1;
         }
       }
@@ -356,8 +420,26 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
           break;
         }
 
+        case 'message.updated': {
+          // The one event that carries a role. `EventMessageUpdated` exists in
+          // SDK 1.18.32 with `properties.info: Message`, and `Message` is
+          // `UserMessage | AssistantMessage` with `role: 'user' | 'assistant'`
+          // and a `sessionID` on both, so the assistant rule is implementable
+          // against this version rather than guessed at. See state.ts.
+          const info = event.properties.info;
+          markMessage(info.sessionID, info.id, info.role);
+          break;
+        }
+
         case 'message.part.updated': {
           const part = event.properties.part;
+          // Every `Part` variant in the 1.18.32 SDK carries `messageID`, so a
+          // part is proof that the session is NOT empty. That is what makes
+          // `perSession`'s "no messages -> green" rule safe to sit above
+          // `active`: a session can only be `active` by way of a part, and a
+          // part always registers its message here first.
+          markMessage(part.sessionID, part.messageID, '');
+
           if (part.type === 'tool') {
             const record = get(part.sessionID);
             switch (part.state.status) {
@@ -365,19 +447,26 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
               case 'running': {
                 // No TTL on this one -- see `LiveSession.toolRunning`.
                 record.toolRunning = true;
-                record.status = 'busy';
                 clearError(part.sessionID);
                 break;
               }
               case 'error': {
+                // A FAILED OR CANCELLED TOOL IS NOT AN ERROR. Pressing ESC
+                // arrives here, as `state.status === 'error'`, and the
+                // reference implementation has no error concept at all: a tool
+                // that is not running is simply not in its active set. Raising
+                // the error flag here is what used to leave the key red for a
+                // full ERROR_TTL_MS after every interrupt -- because
+                // `setStatus` deliberately does not clear `error` on idle, and
+                // an interrupt is usually followed straight away by
+                // `session.idle`. `error` now belongs to `session.error`
+                // alone: a provider/API failure, which still maps to red and is
+                // still bounded by ERROR_TTL_MS.
                 record.toolRunning = false;
-                markError(part.sessionID);
-                record.status = 'idle';
                 break;
               }
               case 'completed': {
                 record.toolRunning = false;
-                record.status = 'idle';
                 // An error is not sticky. One early tool error followed by a
                 // stream of `completed` parts means the agent recovered and is
                 // demonstrably working; leaving the light red for the rest of
@@ -387,6 +476,12 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
                 break;
               }
             }
+            // `status` is deliberately NEVER written from a part event. It
+            // belongs to the session lifecycle -- `session.status` and
+            // `session.idle`, and nothing else. `perSession` checks
+            // `status === 'idle'` BEFORE `active`, so a part that declared the
+            // session idle would flash the key green in the middle of a turn
+            // every time a tool completed.
             break;
           }
 
@@ -400,10 +495,10 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
             const record = get(part.sessionID);
             record.textActive = true;
             record.textAt = Date.now();
-            // `status` is deliberately NOT touched. A text part must not
-            // resurrect a session that is idle -- `perSession` checks
-            // `status === 'idle'` before `active`, so a stale stream window
-            // can never turn a finished session red.
+            // `status` is deliberately NOT touched, and that is a general
+            // invariant rather than a local choice: the session status belongs
+            // to the session lifecycle events (`session.status`,
+            // `session.idle`) and NEVER to a part event. See the tool branch.
           }
           break;
         }
@@ -413,9 +508,9 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
           for (const permissionID of sessions.get(info.id)?.pending ?? []) {
             pendingAt.delete(permissionID);
           }
-          // The record itself carries `toolRunning` / `textActive` / `textAt`,
-          // so deleting it clears all three; `errorAt` is a parallel map and
-          // has to be dropped explicitly.
+          // The record itself carries `toolRunning` / `textActive` / `textAt`
+          // / `messages`, so deleting it clears all of them; `errorAt` is a
+          // parallel map and has to be dropped explicitly.
           errorAt.delete(info.id);
           sessions.delete(info.id);
           break;
@@ -431,7 +526,10 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
           break;
       }
 
-      beat();
+      // Coalesced, not immediate: a burst of events in one tick produces ONE
+      // derivation. Still synchronous to return -- arming a timer blocks
+      // nothing -- so OpenCode is not made to wait on us.
+      scheduleBeat();
     },
 
     'permission.ask': async (input, output) => {
@@ -444,11 +542,23 @@ export const StreamDeckStatus: Plugin = async ({ client }) => {
       } else {
         clearPending(input.sessionID, input.id);
       }
-      beat();
+      // Coalesced on the same 0ms timer as the events. A prompt is the one
+      // thing worth telling the deck about immediately, but the timer is a
+      // zero-delay one, so "immediately" is still the next turn of the event
+      // loop -- and it keeps `beat` in exactly one place for every input.
+      scheduleBeat();
     },
 
     dispose: async () => {
       clearInterval(timer);
+      // A pending coalesced beat must never outlive the plugin: it would land
+      // after `transport.stop()`... which the transport would swallow anyway,
+      // but clearing it is what makes "no beat after dispose" true by
+      // construction rather than by the stopped flag catching it.
+      if (coalesceTimer !== undefined) {
+        clearTimeout(coalesceTimer);
+        coalesceTimer = undefined;
+      }
       // Stop FIRST: a beat must never land after the final green and flip the
       // light back on during shutdown.
       transport.stop();

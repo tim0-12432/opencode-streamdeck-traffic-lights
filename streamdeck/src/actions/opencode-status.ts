@@ -136,7 +136,7 @@ function imageFor(settings: Settings, state: State): string {
   return fallbackImage(state);
 }
 
-@action({ UUID: 'com.tim0-12432.opencode-traffic-lights.status' })
+@action({ UUID: 'com.tim0-12432.opencode-streamdeck-traffic-lights.status' })
 export class OpenCodeStatus extends SingletonAction<Settings> {
   /**
    * Serialised per instance, and the only thing allowed to write

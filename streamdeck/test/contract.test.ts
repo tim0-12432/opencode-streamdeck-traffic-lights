@@ -82,7 +82,7 @@ const PAINT_CHAIN_TS = path.join(REPO_ROOT, 'streamdeck', 'src', 'actions', 'pai
 const MANIFEST_JSON = path.join(
   REPO_ROOT,
   'streamdeck',
-  'com.tim0-12432.opencode-traffic-lights.sdPlugin',
+  'com.tim0-12432.opencode-streamdeck-traffic-lights.sdPlugin',
   'manifest.json',
 );
 
@@ -572,19 +572,30 @@ describe('resolveConfig() -- shared/contract.ts', () => {
 });
 
 describe('perSession() / aggregate() / derive() -- opencode/src/plugin/state.ts', () => {
+  // The default is a session that HAS a conversation: one message seen, and at
+  // least one of them from the assistant. Rules 4 and 6 below are the two
+  // message rules added for parity with the reference implementation, and both
+  // need the fields emptied to be observed at all.
   function record(overrides: Partial<SessionRecord> = {}): SessionRecord {
     return {
       status: 'idle',
       pending: new Set<string>(),
       error: false,
       active: false,
+      messages: new Set<string>(['msg_1']),
+      hasAssistantMessage: true,
       lastSeen: 0,
       ...overrides,
     };
   }
 
+  /** A session this process has seen no message on at all. */
+  const NO_MESSAGES = { messages: new Set<string>(), hasAssistantMessage: false };
+  /** A session that has the user's prompt but no assistant reply yet. */
+  const ONLY_USER = { messages: new Set<string>(['msg_1']), hasAssistantMessage: false };
+
   // The mapping, in one place:
-  //   green  -- idle, or blocked on the user (a pending permission)
+  //   green  -- idle, no messages yet, or blocked on the user
   //   yellow -- busy with no tool and no text output: thinking
   //   red    -- a tool is running, text is streaming, or the session errored
   it('idle with nothing pending is green', () => {
@@ -642,6 +653,56 @@ describe('perSession() / aggregate() / derive() -- opencode/src/plugin/state.ts'
     assert.equal(perSession(record({ status: 'idle', error: true })), 'red');
   });
 
+  it('PARITY: a session with NO messages is green, whatever its status', () => {
+    // Straight from the reference implementation, which returns green for a
+    // session whose message list is empty. The rule sits ABOVE `active`, so
+    // this is only safe because a part always registers its message id -- see
+    // the next test.
+    assert.equal(perSession(record({ status: 'busy', ...NO_MESSAGES })), 'green');
+    assert.equal(perSession(record({ status: 'retry', ...NO_MESSAGES })), 'green');
+    // It still yields to an error and to a pending prompt, which are earlier.
+    assert.equal(perSession(record({ status: 'busy', error: true, ...NO_MESSAGES })), 'red');
+    assert.equal(
+      perSession(record({ status: 'busy', pending: new Set(['p1']), ...NO_MESSAGES })),
+      'green',
+    );
+  });
+
+  it('PARITY SAFETY: a busy session with an active tool is RED, not the green above', () => {
+    // The one failure mode that would make the new rule dangerous: a genuinely
+    // working session painted green because message tracking was unreliable.
+    // A session can only be `active` via a part, and every part carries its
+    // messageID, so the two states cannot disagree -- and if they somehow did,
+    // this is the assertion that catches it.
+    const working = record({ status: 'busy', active: true });
+    assert.equal(working.messages.size, 1);
+    assert.equal(perSession(working), 'red');
+  });
+
+  it('PARITY: a busy session with no ASSISTANT message yet is yellow', () => {
+    // The user pressed enter; the model has not answered. Working in progress,
+    // not at rest and not a failure.
+    assert.equal(perSession(record({ status: 'busy', ...ONLY_USER })), 'yellow');
+    assert.equal(perSession(record({ status: 'retry', ...ONLY_USER })), 'yellow');
+    // Below `active`: a tool running before the first assistant message is
+    // complete is still red.
+    assert.equal(perSession(record({ status: 'busy', active: true, ...ONLY_USER })), 'red');
+  });
+
+  it('REGRESSION: the message rules are pure reads -- they never write the record', () => {
+    const watched = record({ status: 'busy', ...ONLY_USER });
+    const before = {
+      messages: [...watched.messages],
+      hasAssistantMessage: watched.hasAssistantMessage,
+    };
+
+    perSession(watched);
+    derive([watched]);
+
+    assert.deepEqual([...watched.messages], before.messages);
+    assert.equal(watched.hasAssistantMessage, before.hasAssistantMessage);
+  });
+
   it('aggregate: any red anywhere beats any yellow anywhere', () => {
     assert.equal(aggregate(['red', 'yellow']), 'red');
     assert.equal(aggregate(['yellow', 'red']), 'red');
@@ -688,6 +749,22 @@ describe('perSession() / aggregate() / derive() -- opencode/src/plugin/state.ts'
   it('derive: several pending permissions still read as one green', () => {
     const many = record({ pending: new Set(['a', 'b', 'c']) });
     assert.equal(derive([many]), 'green');
+  });
+
+  it('derive: one message-less session among working ones does not dim the deck', () => {
+    // The message-less rule is per session, and green is the weakest colour, so
+    // a fresh session in the same process cannot hold the key down.
+    const sessions = [
+      record({ status: 'busy', ...NO_MESSAGES }),
+      record({ status: 'busy', active: true }),
+    ];
+    assert.equal(derive(sessions), 'red');
+
+    const allQuiet = [
+      record({ status: 'busy', ...NO_MESSAGES }),
+      record({ status: 'busy' }),
+    ];
+    assert.equal(derive(allQuiet), 'yellow', 'the thinking session still decides the key');
   });
 });
 

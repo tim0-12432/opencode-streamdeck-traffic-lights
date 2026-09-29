@@ -1,6 +1,0 @@
-2026-09-27T11:22:28.746Z ERROR Could not connect to Stream Deck: Error: Unable to establish a connection with Stream Deck, missing command line arguments: -port, -pluginUUID, -registerEvent, -info
-2026-09-27T11:22:28.753Z INFO  OpenCode status listening on 127.0.0.1:8765
-2026-09-27T11:22:28.900Z WARN  No visible key is configured for instance 1. Set the action's instance in the property inspector to 1 (or set OPENCODE_STREAMDECK_INSTANCE=1 on the OpenCode side).
-2026-09-27T11:22:28.915Z WARN  No visible key is configured for instance 1. Set the action's instance in the property inspector to 1 (or set OPENCODE_STREAMDECK_INSTANCE=1 on the OpenCode side).
-2026-09-27T11:22:28.937Z WARN  No visible key is configured for instance 1. Set the action's instance in the property inspector to 1 (or set OPENCODE_STREAMDECK_INSTANCE=1 on the OpenCode side).
-2026-09-27T11:22:35.799Z WARN  Instance 1 has not reported for 6000ms. Treating it as gone and forcing its key to green.

@@ -6,7 +6,7 @@ import path from "node:path";
 import url from "node:url";
 
 const isWatching = !!process.env.ROLLUP_WATCH;
-const sdPlugin = "com.tim0-12432.opencode-traffic-lights.sdPlugin";
+const sdPlugin = "com.tim0-12432.opencode-streamdeck-traffic-lights.sdPlugin";
 
 /**
  * @type {import('rollup').RollupOptions}

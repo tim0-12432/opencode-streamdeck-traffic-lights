@@ -1,15 +1,15 @@
 {
 	"$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
-	"Name": "OpenCode Traffic Lights",
+	"Name": "OpenCode StreamDeck Traffic Lights",
 	"Version": "1.0.0.0",
 	"Author": "tim0-12432",
 	"Description": "Mirrors your OpenCode agent's status to a Stream Deck key: green when idle, yellow when it needs your input, red while it works.",
-	"URL": "https://github.com/tim0-12432/opencode-traffic-lights",
-	"SupportURL": "https://github.com/tim0-12432/opencode-traffic-lights/issues",
+	"URL": "https://github.com/tim0-12432/opencode-streamdeck-traffic-lights",
+	"SupportURL": "https://github.com/tim0-12432/opencode-streamdeck-traffic-lights/issues",
 	"Actions": [
 		{
 			"Name": "OpenCode Status",
-			"UUID": "com.tim0-12432.opencode-traffic-lights.status",
+			"UUID": "com.tim0-12432.opencode-streamdeck-traffic-lights.status",
 			"Icon": "imgs/actions/status/icon",
 			"Tooltip": "Displays the status of your OpenCode session.",
 			"PropertyInspectorPath": "ui/status.html",
@@ -23,7 +23,7 @@
 			]
 		}
 	],
-	"Category": "OpenCode Traffic Lights",
+	"Category": "OpenCode StreamDeck Traffic Lights",
 	"CategoryIcon": "imgs/plugin/category-icon",
 	"CodePath": "bin/plugin.js",
 	"Icon": "imgs/plugin/marketplace",
@@ -44,5 +44,5 @@
 	"Nodejs": {
 		"Version": "24"
 	},
-	"UUID": "com.tim0-12432.opencode-traffic-lights"
+	"UUID": "com.tim0-12432.opencode-streamdeck-traffic-lights"
 }
