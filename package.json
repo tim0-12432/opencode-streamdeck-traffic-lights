@@ -11,7 +11,8 @@
     "relink": "pnpm --filter ./streamdeck run relink",
     "validate": "pnpm --filter ./streamdeck run validate",
     "tsc": "pnpm -r --fail-if-no-match run tsc",
-    "test": "pnpm -r --fail-if-no-match run test"
+    "test": "pnpm -r --fail-if-no-match run test",
+    "cve": "pnpm audit --audit-level=high"
   },
   "packageManager": "pnpm@11.21.0",
   "devEngines": {

@@ -123,6 +123,9 @@ jobs:
       - name: Run tests
         run: pnpm test
 
+      - name: Check for CVEs
+        run: pnpm cve
+
   build-opencode:
     runs-on: ubuntu-latest
     needs:
