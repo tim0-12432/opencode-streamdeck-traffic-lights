@@ -3,6 +3,15 @@ on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (DRY RUN, no push or publish).'
+        required: true
+        default: 'v0.0.0'
+
+env:
+  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
 
 concurrency:
   group: "release-${{ github.ref }}"
@@ -65,7 +74,15 @@ jobs:
           # The top-level key must match exactly; -x rejects the nested Nodejs.Version.
           grep -qx "$(printf '\t"Version": "%s.0",' "$VERSION")" "$MANIFEST"
 
+      - name: Show the changed files
+        if: ${{ env.DRY_RUN }}
+        run: |
+          set -euo pipefail
+          git status --short
+          git diff --stat
+
       - name: Commit version changes
+        if: ${{ !env.DRY_RUN }}
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF#refs/tags/}"
@@ -138,6 +155,7 @@ jobs:
         run: pnpm --filter=opencode build
 
       - name: Publish package to NPM
+        if: ${{ !env.DRY_RUN }}
         run: pnpm --filter=opencode publish --provenance --access public --no-git-checks
 
   build-streamdeck:
@@ -211,6 +229,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Release package
+        if: ${{ !env.DRY_RUN }}
         uses: softprops/action-gh-release@v3
         with:
           body: |
