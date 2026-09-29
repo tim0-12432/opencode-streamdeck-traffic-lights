@@ -43,7 +43,7 @@ jobs:
       - name: Install Node.js and pnpm
         uses: pnpm/setup@v2
         with:
-          version: 11.21.0
+          version: 11.28.0
           install: false
 
       - name: Get version from tag
@@ -115,7 +115,7 @@ jobs:
       - name: Install Node.js and pnpm
         uses: pnpm/setup@v2
         with:
-          version: 11.21.0
+          version: 11.28.0
           install: false
 
       - name: Install dependencies
@@ -145,7 +145,7 @@ jobs:
       - name: Install Node.js and pnpm
         uses: pnpm/setup@v2
         with:
-          version: 11.21.0
+          version: 11.28.0
           install: false
 
       - name: Install dependencies
@@ -175,7 +175,7 @@ jobs:
       - name: Install Node.js and pnpm
         uses: pnpm/setup@v2
         with:
-          version: 11.21.0
+          version: 11.28.0
           install: false
 
       - name: Install dependencies
