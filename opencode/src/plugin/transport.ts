@@ -3,8 +3,8 @@ import {
   BACKOFF_MIN_MS,
   REQUEST_TIMEOUT_MS,
   stateUrl,
-} from '../../../shared/contract';
-import type { State, StatePayload } from '../../../shared/contract';
+} from '../../../shared/contract.js';
+import type { State, StatePayload } from '../../../shared/contract.js';
 
 /** Log service name used for every `client.app.log` entry we emit. */
 export const SERVICE = 'opencode-traffic-lights';

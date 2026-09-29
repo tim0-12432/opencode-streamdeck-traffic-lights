@@ -13,12 +13,12 @@ import {
   SESSION_TTL_MS,
   resolveConfig,
   stateUrl,
-} from '../../../shared/contract';
+} from '../../../shared/contract.js';
 
-import { SERVICE, createTransport, formatLine } from './transport';
-import type { LogLevel } from './transport';
-import { derive } from './state';
-import type { SessionRecord, SessionStatusKind } from './state';
+import { SERVICE, createTransport, formatLine } from './transport.js';
+import type { LogLevel } from './transport.js';
+import { derive } from './state.js';
+import type { SessionRecord, SessionStatusKind } from './state.js';
 
 /** Upper bound on the final `green` flush performed during `dispose`. */
 const DISPOSE_FLUSH_MS = 300;

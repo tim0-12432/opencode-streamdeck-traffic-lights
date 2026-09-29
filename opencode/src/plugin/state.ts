@@ -1,4 +1,4 @@
-import type { State } from '../../../shared/contract';
+import type { State } from '../../../shared/contract.js';
 
 /**
  * Status of a single session, flattened from the SDK's `SessionStatus`

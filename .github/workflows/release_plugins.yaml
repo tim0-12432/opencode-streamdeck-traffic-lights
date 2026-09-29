@@ -149,6 +149,9 @@ jobs:
           version: 11.21.0
           install: false
 
+      - name: Install dependencies
+        run: pnpm ci
+
       - name: Build package
         run: pnpm --filter=opencode build
 

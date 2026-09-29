@@ -5,17 +5,36 @@
   "description": "OpenCode plugin that mirrors agent status to a Stream Deck key.",
   "license": "MIT",
   "type": "module",
+  "author": "tim0-12432",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tim0-12432/opencode-traffic-lights.git",
+    "directory": "opencode"
+  },
+  "homepage": "https://github.com/tim0-12432/opencode-traffic-lights#readme",
+  "bugs": {
+    "url": "https://github.com/tim0-12432/opencode-traffic-lights/issues"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/opencode/src/plugin/index.js",
+  "types": "./dist/opencode/src/plugin/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/plugin/index.ts",
-      "default": "./src/plugin/index.ts"
+      "types": "./dist/opencode/src/plugin/index.d.ts",
+      "default": "./dist/opencode/src/plugin/index.js"
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
     "watch": "tsc --noEmit --watch",
     "tsc": "tsc --noEmit",
-    "test": "tsc -p test/tsconfig.json && node --test --test-reporter=spec test/.build/opencode/test/transport.test.js"
+    "test": "tsc -p test/tsconfig.json && node --test --test-reporter=spec test/.build/opencode/test/transport.test.js",
+    "prepack": "pnpm build"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "1.18.32",

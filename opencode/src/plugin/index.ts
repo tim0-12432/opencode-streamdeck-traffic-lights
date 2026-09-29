@@ -1,1 +1,1 @@
-export { StreamDeckStatus } from './streamdeck-status';
+export { StreamDeckStatus } from './streamdeck-status.js';

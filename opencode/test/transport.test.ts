@@ -9,10 +9,10 @@
  *  1. `shared/contract.ts`  -- imported as a real ES module.
  *  2. `opencode/src/plugin/state.ts`      -- imported as a real ES module.
  *  3. `opencode/src/plugin/transport.ts`  -- the REAL file, read from disk and
- *     executed. It cannot be imported directly because it value-imports
- *     `../../../shared/contract` without a file extension, which Node's ESM
- *     resolver rejects for compiled output (Bun and rollup both accept it). So
- *     the source is transpiled to CommonJS with the TypeScript compiler that is
+ *     executed. It cannot be imported directly because this runner transpiles a
+ *     SINGLE file at a time, so its own imports are satisfied by the `require`
+ *     shim below. The source is transpiled to CommonJS with the TypeScript
+ *     compiler that is
  *     already a devDependency and run in a `new Function` scope whose `require`
  *     is a two-entry shim onto the real `contract` namespace. The backoff
  *     ladder, the `inFlight` guard, the retry gate, the payload shape and the
@@ -160,7 +160,7 @@ type PluginModule = {
   StreamDeckStatus: (input: { client: unknown }) => Promise<PluginHooks>;
 };
 
-const CONTRACT_ID = '../../../shared/contract';
+const CONTRACT_ID = '../../../shared/contract.js';
 
 /** Executes a REAL source file in a `new Function` scope with a `require` shim. */
 function loadRealModule<T>(file: string, deps: Record<string, unknown>): T {
@@ -195,8 +195,8 @@ const transportModule = loadRealModule<TransportModule>(TRANSPORT_TS, {
 
 const pluginModule = loadRealModule<PluginModule>(PLUGIN_TS, {
   [CONTRACT_ID]: contract,
-  './transport': transportModule,
-  './state': state,
+  './transport.js': transportModule,
+  './state.js': state,
 });
 
 // ---------------------------------------------------------------------------

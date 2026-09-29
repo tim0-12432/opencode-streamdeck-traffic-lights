@@ -85,10 +85,11 @@ point OpenCode at it.
 
 ## Wiring up OpenCode
 
-OpenCode loads plugins as **raw TypeScript** via Bun. There is no build step and
-there is no compiled output to keep in sync — typechecking *is* the build, which
-is why `pnpm build` in the `opencode` package is `tsc --noEmit`. The package is
-`"private": true` and is not published to npm: point OpenCode at your checkout.
+OpenCode loads plugins as **raw TypeScript** via Bun, so from a clone there is no
+build step and no compiled output to keep in sync — typechecking *is* the build,
+which is why `pnpm build` in the `opencode` package is `tsc --noEmit`. The same
+sources are also compiled to `dist/` and published to npm, but that path is only
+for consumers; a checkout is used as-is.
 
 ### From a clone
 
@@ -124,11 +125,13 @@ bun link /absolute/path/to/opencode-traffic-lights/opencode
 **Link it, do not copy it.** A `file:` dependency — which is what `bun add
 file:/…/opencode` creates — is *copied* into
 `node_modules/@tim0-12432/opencode-traffic-lights-opencode/`, and from there
-the plugin's `import … from '../../../shared/contract'` would resolve outside
+the plugin's `import … from '../../../shared/contract.js'` would resolve outside
 the package entirely, to a `shared/contract` that does not exist. The plugin
 then fails to load with a module-not-found error. `bun link` installs a
-**symlink**, so `../../../shared/contract` still points back into the repo and
-resolves correctly. Use `bun link`, or just use the absolute path above.
+**symlink**, so `../../../shared/contract.js` still points back into the repo and
+resolves correctly. Use `bun link`, or just use the absolute path above — or,
+easiest of all, install the published package from npm, which ships its
+compiled copy under `dist/`.
 
 The Stream Deck half does **not** work from a clone: the deck is a separate
 machine-facing install and is distributed as a `.streamDeckPlugin` bundle (see
