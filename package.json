@@ -13,10 +13,11 @@
     "tsc": "pnpm -r --fail-if-no-match run tsc",
     "test": "pnpm -r --fail-if-no-match run test"
   },
+  "packageManager": "pnpm@11.21.0",
   "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "^11.21.0",
+    "runtime": {
+      "name": "node",
+      "version": "^22.0.0",
       "onFail": "download"
     }
   },
