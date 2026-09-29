@@ -60,28 +60,10 @@ jobs:
 
           pnpm version "$VERSION" -r --no-git-tag-version --no-git-checks
 
-          # Stream Deck manifest Version is 4-part (major.minor.patch.build); build stays 0.
-          # Targeted single-line replacement so tab indentation and the rest of the file stay byte-identical.
-          node -e '
-          const fs = require("fs");
-          const p = process.argv[1];
-          const next = process.argv[2];
-          const lines = fs.readFileSync(p, "utf8").split("\n");
-          // "Version" also appears nested under Nodejs; the top-level key is the least-indented one.
-          const re = /^([ \t]*)"Version"[ \t]*:[ \t]*"[^"]*"/;
-          const hits = [];
-          lines.forEach((l, i) => { const m = l.match(re); if (m) hits.push({ i, indent: m[1].length }); });
-          if (hits.length === 0) { console.error("FAIL: no Version line in " + p); process.exit(1); }
-          const min = Math.min(...hits.map((h) => h.indent));
-          const top = hits.filter((h) => h.indent === min);
-          if (top.length !== 1) { console.error("FAIL: ambiguous top-level Version in " + p); process.exit(1); }
-          const i = top[0].i;
-          const replaced = lines[i].replace(re, (m, ind) => ind + "\"Version\": \"" + next + ".0\"");
-          if (replaced === lines[i]) { console.error("FAIL: Version line not rewritten: " + lines[i]); process.exit(1); }
-          lines[i] = replaced;
-          fs.writeFileSync(p, lines.join("\n"));
-          console.log("rewrote line " + (i + 1) + ": " + next + ".0");
-          ' "$MANIFEST" "$VERSION"
+          # Manifest Version is 4-part (major.minor.patch.build); build stays 0.
+          sed -i "0,/\"Version\":/s|\"Version\": \"[^\"]*\"|\"Version\": \"${VERSION}.0\"|" "$MANIFEST"
+          # The top-level key must match exactly; -x rejects the nested Nodejs.Version.
+          grep -qx "$(printf '\t"Version": "%s.0",' "$VERSION")" "$MANIFEST"
 
       - name: Commit version changes
         run: |
