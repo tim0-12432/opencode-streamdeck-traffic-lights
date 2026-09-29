@@ -112,10 +112,14 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: main
+
       - name: Prepare Node.js and pnpm
         uses: ./.github/actions/pnpm-prepare
-        with:
-          checkout-main: true
 
       - name: Run typechecking
         run: pnpm tsc
@@ -135,10 +139,14 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: main
+
       - name: Prepare Node.js and pnpm
         uses: ./.github/actions/pnpm-prepare
-        with:
-          checkout-main: true
 
       - name: Build package
         run: pnpm --filter ./opencode --fail-if-no-match build
@@ -155,10 +163,14 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: main
+
       - name: Prepare Node.js and pnpm
         uses: ./.github/actions/pnpm-prepare
-        with:
-          checkout-main: true
 
       - name: Build package
         run: pnpm --filter ./streamdeck --fail-if-no-match build

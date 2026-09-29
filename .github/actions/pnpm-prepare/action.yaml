@@ -4,20 +4,9 @@ inputs:
   version:
     description: 'The version of pnpm to install. If not specified, the latest version will be installed.'
     required: false
-  checkout-main:
-    description: 'Whether to checkout the main branch again. Default is false.'
-    required: false
-    default: false
 runs:
   using: "composite"
   steps:
-    - name: Checkout repository
-      if: ${{ inputs.checkout-main }}
-      uses: actions/checkout@v7
-      with:
-        fetch-depth: 0
-        ref: main
-
     - name: Install Node.js and pnpm (${{ inputs.version }})
       if: ${{ inputs.version }}
       uses: pnpm/setup@v2
