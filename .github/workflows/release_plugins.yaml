@@ -14,15 +14,22 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Validate branch
-        run: |
-          if [[ "${GITHUB_REF#refs/heads/}" != "main" ]]; then
-            echo "This workflow only runs on the main branch."
-            exit 1
-          fi
-
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Require the tag to be on main
+        run: |
+          set -euo pipefail
+          # This runs on a TAG push, so GITHUB_REF is refs/tags/vX.Y.Z and never
+          # "main". What matters is that the tagged commit is reachable from
+          # main, otherwise a release is cut from untested code.
+          git fetch origin main --no-tags
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "FAIL: ${GITHUB_SHA} (${GITHUB_REF}) is not reachable from main. Refusing to release untested code."
+            exit 1
+          fi
 
       - name: Install Node.js and pnpm
         uses: pnpm/setup@v2
@@ -78,21 +85,56 @@ jobs:
 
       - name: Commit version changes
         run: |
-          git push -d origin "refs/tags/${GITHUB_REF#refs/tags/}" -f || echo "No tag to delete"
-          git tag -d "${GITHUB_REF#refs/tags/}" || echo "No tag to delete"
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
           git config user.name "GitHub Actions"
           git config user.email "noreply.github@github.local"
           git add package.json opencode/package.json streamdeck/package.json streamdeck/com.tim0-12432.opencode-traffic-lights.sdPlugin/manifest.json
-          git commit -m "Set version to ${{ steps.get_version.outputs.version }}" || echo "No changes to commit"
-          git push origin main -f || echo "No changes to push"
-          git tag "${GITHUB_REF#refs/tags/}" -m "Release version ${{ steps.get_version.outputs.version }}" || echo "No tag to create"
-          git push origin "${GITHUB_REF#refs/tags/}" -f || echo "No tag to push"
+          if git diff --cached --quiet; then
+            echo "Nothing to commit: the manifests already carried ${TAG#v}"
+          else
+            git commit -m "Set version to ${{ steps.get_version.outputs.version }}"
+            git push origin HEAD:main
+          fi
+          # --force: the tag was pushed before this job, so it still points at the
+          # old commit and has to be moved, not created.
+          git tag -f "$TAG" -m "Release version ${{ steps.get_version.outputs.version }}"
+          git push origin "refs/tags/$TAG" --force
 
-  build-opencode:
+  verify:
     runs-on: ubuntu-latest
     needs: set-version
     permissions:
-      contents: write
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Install Node.js and pnpm
+        uses: pnpm/setup@v2
+        with:
+          version: 11.21.0
+          install: false
+
+      - name: Install dependencies
+        run: pnpm ci
+
+      - name: Run typechecking
+        run: pnpm tsc
+
+      - name: Run tests
+        run: pnpm test
+
+  build-opencode:
+    runs-on: ubuntu-latest
+    needs:
+      - set-version
+      - verify
+    permissions:
+      contents: read
       id-token: write
     steps:
       - name: Checkout repository
@@ -106,9 +148,6 @@ jobs:
         with:
           version: 11.21.0
           install: false
-      
-      - name: Install dependencies
-        run: pnpm ci
 
       - name: Build package
         run: pnpm --filter=opencode build
@@ -118,10 +157,11 @@ jobs:
 
   build-streamdeck:
     runs-on: ubuntu-latest
-    needs: set-version
+    needs:
+      - set-version
+      - verify
     permissions:
-      contents: write
-      id-token: write
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -134,15 +174,29 @@ jobs:
         with:
           version: 11.21.0
           install: false
-      
+
       - name: Install dependencies
         run: pnpm ci
 
       - name: Build package
         run: pnpm --filter=streamdeck build
 
-      - name: Publish package to NPM
-        run: pnpm --filter=streamdeck publish --provenance --access public --no-git-checks
+      - name: Validate the manifest
+        run: pnpm --filter=streamdeck validate
+
+      - name: Pack the .sdPlugin distributable
+        run: pnpm --filter=streamdeck exec streamdeck pack com.tim0-12432.opencode-traffic-lights.sdPlugin --output . --force
+
+      - name: Show the packed bundle
+        run: ls -l streamdeck/*.streamDeckPlugin
+
+      - name: Upload the .streamDeckPlugin bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdplugin-bundle
+          path: streamdeck/*.streamDeckPlugin
+          if-no-files-found: error
+          retention-days: 30
 
   create-release:
     runs-on: ubuntu-latest
@@ -151,13 +205,18 @@ jobs:
       - build-streamdeck
     permissions:
       contents: write
-      id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: main
+
+      - name: Download the .streamDeckPlugin bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: sdplugin-bundle
+          path: release-assets
 
       - name: Get version from package
         id: get_version
@@ -170,14 +229,32 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           body: |
-            **Usage**:
+            ## OpenCode plugin
+
+            Add the OpenCode plugin to your project with:
+
             ```bash
             opencode plugin add @tim0-12432/opencode-traffic-lights-opencode
             ```
 
-            **Official StreamDeck Marketplace**:
+            or download the plugin directly and point OpenCode to it:
+
+            ```json
+            {
+              "$schema": "https://opencode.ai/config.json",
+              "plugin": [
+                "C:/absolute/path/to/opencode-traffic-lights/opencode/src/plugin/index.ts"
+              ]
+            }
+            ```
+
+            ## Stream Deck plugin
+
+            Download and open `com.tim0-12432.opencode-traffic-lights.streamDeckPlugin`
+            from the assets below, or install it from the official marketplace:
+
             - https://marketplace.elgato.com/product/opencode-traffic-lights-streamdeck-65b13b96-043e-4fd7-9cc6-78360a6a648c
 
+          files: release-assets/*.streamDeckPlugin
           generate_release_notes: true
           make_latest: true
-    

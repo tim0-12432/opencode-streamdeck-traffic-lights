@@ -6,7 +6,7 @@
  * WHAT IS REALLY EXERCISED (nothing here is a hand-written stand-in unless
  * explicitly flagged):
  *
- *  1. `shared/contract.ts`                -- imported as a real ES module.
+ *  1. `shared/contract.ts`  -- imported as a real ES module.
  *  2. `opencode/src/plugin/state.ts`      -- imported as a real ES module.
  *  3. `opencode/src/plugin/transport.ts`  -- the REAL file, read from disk and
  *     executed. It cannot be imported directly because it value-imports
@@ -78,6 +78,7 @@ function findRepoRoot(start: string): string {
 const REPO_ROOT = findRepoRoot(path.dirname(fileURLToPath(import.meta.url)));
 const PLUGIN_TS = path.join(REPO_ROOT, 'opencode', 'src', 'plugin', 'streamdeck-status.ts');
 const TRANSPORT_TS = path.join(REPO_ROOT, 'opencode', 'src', 'plugin', 'transport.ts');
+const CONTRACT_TS = path.join(REPO_ROOT, 'shared', 'contract.ts');
 const pluginSource = readFileSync(PLUGIN_TS, 'utf8');
 
 /**
@@ -403,9 +404,10 @@ describe('shared/contract.ts', () => {
   });
 
   it('has zero imports of any kind', () => {
-    // `shared/contract.ts` is consumed as raw TypeScript by BOTH sides, so it
-    // must stay dependency-free. The file is read from disk, not imported.
-    const source = readFileSync(path.join(REPO_ROOT, 'shared', 'contract.ts'), 'utf8');
+    // `shared/contract.ts` is consumed as raw TypeScript by BOTH
+    // sides, so it must stay dependency-free. The file is read from disk, not
+    // imported.
+    const source = readFileSync(path.join(CONTRACT_TS), 'utf8');
     const imports = source
       .split('\n')
       .filter((line) => /^\s*(import|export)\s+.*\bfrom\b|require\(/.test(line));

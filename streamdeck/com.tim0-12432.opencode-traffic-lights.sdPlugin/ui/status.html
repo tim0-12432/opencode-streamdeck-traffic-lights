@@ -69,10 +69,11 @@
   <p id="status" role="status"></p>
 
   <script>
-    // Mirrors `DEFAULT_INSTANCE` in shared/contract.ts, which the plugin half
-    // reads as `settings.instance ?? DEFAULT_INSTANCE`. This property inspector
-    // is plain HTML with no module system and cannot import it, so the two must
-    // be kept in step BY HAND: if contract.ts changes, change this too.
+    // Mirrors `DEFAULT_INSTANCE` in shared/contract.ts, which the
+    // plugin half reads as `settings.instance ?? DEFAULT_INSTANCE`. This
+    // property inspector is plain HTML with no module system and cannot import
+    // it, so the two must be kept in step BY HAND: if contract.ts changes,
+    // change this too.
     const DEFAULT_INSTANCE = 1;
 
     // `setImage` documents PNG and JPEG. WebP is deliberately NOT offered: it

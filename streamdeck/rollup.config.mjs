@@ -30,14 +30,18 @@ const config = {
 		typescript({
 			tsconfig: "./tsconfig.json",
 			mapRoot: isWatching ? "./" : undefined,
-			// The default filter is scoped to this package, so it silently skipped
-			// ../shared/contract.ts and rollup then choked on raw TypeScript.
+			// The default filter is scoped to THIS package root, so the shared
+			// contract at ../shared/contract.ts is silently SKIPPED by the
+			// transform -- rollup then receives raw TypeScript and fails with a
+			// confusing `Expected a semicolon`. It lives outside this package, so
+			// it must stay listed here explicitly.
 			include: ["src/**/*.ts", "../shared/**/*.ts"]
 		}),
-		// `.ts` is in `extensions` because ../shared/contract.ts is consumed as RAW
-		// TypeScript (shared with the opencode package, which runs on Bun with no
-		// build step). Consumers import it extensionless as `shared/contract`, so
-		// without this rollup cannot resolve the import to a .ts file.
+		// `.ts` is in `extensions` because ../shared/contract.ts is consumed as
+		// RAW TypeScript: it is shared with opencode/, which Bun loads directly
+		// with no build step, so it can never be compiled ahead of time.
+		// Consumers import it extensionless as `shared/contract`, so without this
+		// rollup cannot resolve the import to a .ts file.
 		nodeResolve({
 			browser: false,
 			exportConditions: ["node"],

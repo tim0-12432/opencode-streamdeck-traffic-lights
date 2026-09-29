@@ -1,10 +1,20 @@
 {
   "name": "@tim0-12432/opencode-traffic-lights-streamdeck",
   "version": "1.0.0",
-  "private": false,
+  "private": true,
   "description": "OpenCode agent status mirrored to an Elgato Stream Deck key.",
   "license": "MIT",
   "type": "module",
+  "author": "tim0-12432",
+  "homepage": "https://github.com/tim0-12432/opencode-traffic-lights#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tim0-12432/opencode-traffic-lights.git",
+    "directory": "streamdeck"
+  },
+  "bugs": {
+    "url": "https://github.com/tim0-12432/opencode-traffic-lights/issues"
+  },
   "files": [
     "com.tim0-12432.opencode-traffic-lights.sdPlugin"
   ],
@@ -15,7 +25,6 @@
     "tsc": "tsc --noEmit",
     "test": "tsc -p test/tsconfig.json && node --test --test-reporter=spec test/.build/streamdeck/test/contract.test.js",
     "validate": "streamdeck validate com.tim0-12432.opencode-traffic-lights.sdPlugin",
-    "pack": "streamdeck pack com.tim0-12432.opencode-traffic-lights.sdPlugin",
     "relink": "streamdeck unlink com.tim0-12432.opencode-traffic-lights && streamdeck link com.tim0-12432.opencode-traffic-lights.sdPlugin"
   },
   "dependencies": {
