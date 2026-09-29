@@ -48,8 +48,17 @@ jobs:
 
       - name: Get version from tag
         id: get_version
+        env:
+          GITHUB_REF: ${{ github.ref }}
+          DRY_RUN: ${{ env.DRY_RUN }}
+          VERSION_INPUT: ${{ github.event.inputs.version }}
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
+          set -euo pipefail
+          if [[ "$DRY_RUN" == "true" ]]; then
+            TAG="$VERSION_INPUT"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
           VERSION="${TAG#v}"
           if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+) ]]; then
             VERSION="${BASH_REMATCH[1]}"
