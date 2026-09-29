@@ -237,7 +237,7 @@ jobs:
             Add the OpenCode plugin to your project with:
 
             ```bash
-            opencode plugin add @tim0-12432/opencode-traffic-lights-opencode
+            opencode plugin @tim0-12432/opencode-traffic-lights-opencode
             ```
 
             or download the plugin directly and point OpenCode to it:
