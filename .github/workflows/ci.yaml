@@ -21,14 +21,8 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Install Node.js and pnpm
-      uses: pnpm/setup@v2
-      with:
-        version: 11.28.0
-        install: false
-
-    - name: Install dependencies
-      run: pnpm ci
+    - name: Prepare Node.js and pnpm
+      uses: ./actions/pnpm-prepare
 
     - name: Run typechecking
       run: pnpm tsc

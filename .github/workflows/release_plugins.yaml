@@ -40,11 +40,8 @@ jobs:
             exit 1
           fi
 
-      - name: Install Node.js and pnpm
-        uses: pnpm/setup@v2
-        with:
-          version: 11.28.0
-          install: false
+      - name: Prepare Node.js and pnpm
+        uses: ./actions/pnpm-prepare
 
       - name: Get version from tag
         id: get_version
@@ -115,20 +112,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
+      - name: Prepare Node.js and pnpm
+        uses: ./actions/pnpm-prepare
         with:
-          fetch-depth: 0
-          ref: main
-
-      - name: Install Node.js and pnpm
-        uses: pnpm/setup@v2
-        with:
-          version: 11.28.0
-          install: false
-
-      - name: Install dependencies
-        run: pnpm ci
+          checkout-main: true
 
       - name: Run typechecking
         run: pnpm tsc
@@ -145,20 +132,10 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
+      - name: Prepare Node.js and pnpm
+        uses: ./actions/pnpm-prepare
         with:
-          fetch-depth: 0
-          ref: main
-
-      - name: Install Node.js and pnpm
-        uses: pnpm/setup@v2
-        with:
-          version: 11.28.0
-          install: false
-
-      - name: Install dependencies
-        run: pnpm ci
+          checkout-main: true
 
       - name: Build package
         run: pnpm --filter ./opencode --fail-if-no-match build
@@ -175,20 +152,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
+      - name: Prepare Node.js and pnpm
+        uses: ./actions/pnpm-prepare
         with:
-          fetch-depth: 0
-          ref: main
-
-      - name: Install Node.js and pnpm
-        uses: pnpm/setup@v2
-        with:
-          version: 11.28.0
-          install: false
-
-      - name: Install dependencies
-        run: pnpm ci
+          checkout-main: true
 
       - name: Build package
         run: pnpm --filter ./streamdeck --fail-if-no-match build
@@ -237,6 +204,13 @@ jobs:
           echo "Extracted version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
+      - name: Attest provenance manifest
+        id: attest
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            release-assets/*.streamDeckPlugin
+
       - name: Release package
         if: ${{ !env.DRY_RUN }}
         uses: softprops/action-gh-release@v3
@@ -268,6 +242,8 @@ jobs:
 
             - https://marketplace.elgato.com/product/opencode-traffic-lights-streamdeck-65b13b96-043e-4fd7-9cc6-78360a6a648c
 
-          files: release-assets/*.streamDeckPlugin
+          files: |
+            release-assets/*.streamDeckPlugin
+            ${{ steps.attest.outputs.bundle-path }}
           generate_release_notes: true
           make_latest: true
