@@ -41,7 +41,7 @@ jobs:
           fi
 
       - name: Prepare Node.js and pnpm
-        uses: ./actions/pnpm-prepare
+        uses: ./.github/actions/pnpm-prepare
 
       - name: Get version from tag
         id: get_version
@@ -113,7 +113,7 @@ jobs:
       contents: read
     steps:
       - name: Prepare Node.js and pnpm
-        uses: ./actions/pnpm-prepare
+        uses: ./.github/actions/pnpm-prepare
         with:
           checkout-main: true
 
@@ -133,7 +133,7 @@ jobs:
       id-token: write
     steps:
       - name: Prepare Node.js and pnpm
-        uses: ./actions/pnpm-prepare
+        uses: ./.github/actions/pnpm-prepare
         with:
           checkout-main: true
 
@@ -153,7 +153,7 @@ jobs:
       contents: read
     steps:
       - name: Prepare Node.js and pnpm
-        uses: ./actions/pnpm-prepare
+        uses: ./.github/actions/pnpm-prepare
         with:
           checkout-main: true
 

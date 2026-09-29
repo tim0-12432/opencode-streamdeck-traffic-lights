@@ -22,7 +22,7 @@ jobs:
         fetch-depth: 0
 
     - name: Prepare Node.js and pnpm
-      uses: ./actions/pnpm-prepare
+      uses: ./.github/actions/pnpm-prepare
 
     - name: Run typechecking
       run: pnpm tsc
