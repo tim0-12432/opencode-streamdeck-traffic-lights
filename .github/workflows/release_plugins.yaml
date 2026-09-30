@@ -246,7 +246,7 @@ jobs:
             {
               "$schema": "https://opencode.ai/config.json",
               "plugin": [
-                "C:/absolute/path/to/opencode-traffic-lights/opencode/src/plugin/index.ts"
+                "C:/absolute/path/to/opencode-streamdeck-traffic-lights/opencode/src/plugin/index.ts"
               ]
             }
             ```
@@ -256,7 +256,7 @@ jobs:
             Download and open `com.tim0-12432.opencode-streamdeck-traffic-lights.streamDeckPlugin`
             from the assets below, or install it from the official marketplace:
 
-            - https://marketplace.elgato.com/product/opencode-traffic-lights-streamdeck-65b13b96-043e-4fd7-9cc6-78360a6a648c
+            - https://marketplace.elgato.com/product/opencode-streamdeck-traffic-lights-65b13b96-043e-4fd7-9cc6-78360a6a648c
 
           files: |
             release-assets/*.streamDeckPlugin

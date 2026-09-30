@@ -23,12 +23,21 @@
  * (cmd.exe / /bin/sh), which resolves `.CMD` via PATHEXT on Windows and finds
  * the bin on PATH on POSIX -- the same resolution the original npm-script form
  * relied on.
+ *
+ * Paths come from `node:path` (resolved from this script's own location) rather
+ * than shell features, so the script works regardless of the directory it is
+ * invoked from. The plugin path is double-quoted in the shell command so that
+ * paths containing spaces (common on Windows, e.g. under `C:\Users\Your Name\`)
+ * are passed through intact on both cmd.exe and POSIX sh.
  */
 import { execSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OLD_UUID = 'com.tim0-12432.opencode-traffic-lights';
 const NEW_UUID = 'com.tim0-12432.opencode-streamdeck-traffic-lights';
-const PLUGIN = `${NEW_UUID}.sdPlugin`;
+const PLUGIN = path.resolve(HERE, '..', `${NEW_UUID}.sdPlugin`);
 
 function unlink(uuid) {
   try {
@@ -45,4 +54,4 @@ unlink(NEW_UUID);
 
 // The link step must succeed; let its exit code propagate to the caller.
 console.log(`Linking ${PLUGIN}...`);
-execSync(`streamdeck link ${PLUGIN}`, { stdio: 'inherit' });
+execSync(`streamdeck link "${PLUGIN}"`, { stdio: 'inherit' });
