@@ -9,8 +9,7 @@
 
 See your OpenCode agent's status on a Stream Deck key, so you know from across the room whether it needs you.
 
-![Hero image](docs/images/hero.png)
-<!-- IMAGE: A desk photo or render. A Stream Deck in the foreground with one key lit (red works best), a monitor with OpenCode running in the background. Conveys the "glance from across the room" idea at once. Wide format, ~1200×600. -->
+![Hero image](docs/assets/ai-generated-hero-2.png)
 
 ## What the colours mean
 
@@ -20,8 +19,7 @@ See your OpenCode agent's status on a Stream Deck key, so you know from across t
 | 🟡 | **Yellow** | Thinking: busy, but no tool is running and no text is being written. |
 | 🔴 | **Red** | Working: a tool is running or text is streaming. Also shown for **1 minute after an error**. |
 
-![The three key states](docs/images/states.png)
-<!-- IMAGE: Three Stream Deck keys side by side (green, yellow, red), each captioned with a short example: "Waiting for you", "Thinking…", "Running: pnpm test". Square tiles on a neutral background, ~900×300. -->
+![The three key states](docs/assets/virtual-streamdeck.png)
 
 If several sessions run in one OpenCode process, the key shows the most urgent one.
 
@@ -33,8 +31,7 @@ Download the `.streamDeckPlugin` file from the [latest release](https://github.c
 **2. Add a key.**
 Drag the **OpenCode Status** action onto any key in the Stream Deck app.
 
-![Adding the action in the Stream Deck app](docs/images/add-action.png)
-<!-- IMAGE: Screenshot of the Stream Deck app. The action is being dragged from the right-hand action list onto an empty key. The property inspector below shows the "Instance" field set to 1, highlighted. -->
+![Adding the action in the Stream Deck app](docs/assets/streamdeck-config.png)
 
 **3. Enable the OpenCode plugin.**
 Add it to `~/.config/opencode/opencode.json`, or to a project-level config:
@@ -57,9 +54,6 @@ OPENCODE_STREAMDECK_INSTANCE=2 opencode
 ```
 
 Then set the same number in the key's **Instance** field. Up to 32 instances are supported.
-
-![Multiple instances](docs/images/multi-instance.png)
-<!-- IMAGE: Diagram. Left: three terminal windows labelled "OpenCode (instance 1)", "(instance 2)", "(instance 3)". Right: a Stream Deck with three lit keys in different colours. Arrows connect each terminal to its matching key. -->
 
 ## Requirements
 
@@ -87,8 +81,7 @@ The plugin ID changed, so existing keys need to be re-added and their **Instance
 
 ## How it works
 
-![Architecture](docs/images/architecture.png)
-<!-- IMAGE: Simple left-to-right diagram. "OpenCode + plugin" → arrow labelled "POST /state every 2 s" → "Stream Deck plugin (127.0.0.1:8765)" → "Key". Minimal, three boxes. -->
+![Architecture](docs/assets/architecture.excalidraw.png)
 
 The OpenCode plugin sends its current state to a small local server inside the Stream Deck plugin every 2 seconds. That server listens on `127.0.0.1` only, so it is never reachable from the network.
 
