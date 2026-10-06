@@ -1,6 +1,6 @@
 {
   "name": "@tim0-12432/opencode-streamdeck-traffic-lights-opencode",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "private": false,
   "description": "OpenCode plugin that mirrors agent status to a Stream Deck key.",
   "license": "MIT",
