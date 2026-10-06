@@ -1,5 +1,5 @@
 {
-  "name": "@tim0-12432/opencode-streamdeck-traffic-lights",
+  "name": "@tim0_12432/opencode-streamdeck-traffic-lights",
   "version": "1.0.0",
   "private": false,
   "description": "OpenCode agent status mirrored to an Elgato Stream Deck key.",
