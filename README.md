@@ -1,6 +1,6 @@
 # OpenCode StreamDeck Traffic Lights
 
-[![npm](https://img.shields.io/npm/v/@tim0-12432/opencode-streamdeck-traffic-lights-opencode?logo=npm)](https://www.npmjs.com/package/@tim0-12432/opencode-streamdeck-traffic-lights-opencode)
+[![npm](https://img.shields.io/npm/v/@tim0-12432/opencode-streamdeck-traffic-lights-opencode?logo=npm)](https://www.npmjs.com/package/@tim0_12432/opencode-streamdeck-traffic-lights-opencode)
 [![Release](https://img.shields.io/github/v/release/tim0-12432/opencode-streamdeck-traffic-lights?logo=github)](https://github.com/tim0-12432/opencode-streamdeck-traffic-lights/releases)
 [![OpenCode](https://img.shields.io/badge/OpenCode-1.18.32-black?logo=opencode)](https://opencode.ai)
 [![Stream Deck](https://img.shields.io/badge/Stream%20Deck-7.1%2B-6441a5)](https://www.elgato.com/stream-deck)
