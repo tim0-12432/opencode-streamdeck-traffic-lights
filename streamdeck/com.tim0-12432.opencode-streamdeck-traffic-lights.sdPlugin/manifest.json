@@ -1,7 +1,7 @@
 {
 	"$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
 	"Name": "OpenCode StreamDeck Traffic Lights",
-	"Version": "1.0.0.0",
+	"Version": "1.0.2.0",
 	"Author": "tim0-12432",
 	"Description": "Mirrors your OpenCode agent's status to a Stream Deck key: green when idle, yellow when it needs your input, red while it works.",
 	"URL": "https://github.com/tim0-12432/opencode-streamdeck-traffic-lights",
