@@ -81,14 +81,14 @@ jobs:
           grep -qx "$(printf '\t"Version": "%s.0",' "$VERSION")" "$MANIFEST"
 
       - name: Show the changed files
-        if: ${{ env.DRY_RUN }}
+        if: ${{ env.DRY_RUN == 'true' }}
         run: |
           set -euo pipefail
           git status --short
           git diff --stat
 
       - name: Commit version changes
-        if: ${{ !env.DRY_RUN }}
+        if: ${{ env.DRY_RUN != 'true' }}
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF#refs/tags/}"
@@ -152,7 +152,7 @@ jobs:
         run: pnpm --filter ./opencode --fail-if-no-match build
 
       - name: Publish package to NPM
-        if: ${{ !env.DRY_RUN }}
+        if: ${{ env.DRY_RUN != 'true' }}
         run: pnpm --filter ./opencode publish --provenance --access public --no-git-checks
 
   build-streamdeck:
@@ -228,7 +228,7 @@ jobs:
           subject-path: release-assets/*.streamDeckPlugin
 
       - name: Release package
-        if: ${{ !env.DRY_RUN }}
+        if: ${{ env.DRY_RUN != 'true' }}
         uses: softprops/action-gh-release@v3
         with:
           body: |
