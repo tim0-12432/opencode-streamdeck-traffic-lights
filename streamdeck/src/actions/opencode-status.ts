@@ -123,12 +123,21 @@ function imageFor(settings: Settings, state: State): string {
 
   if (!selected) return fallbackImage(state);
 
-  // The property inspector hands us a `FileReader.readAsDataURL` result; it must
-  // reach Stream Deck byte-for-byte.
   if (selected.startsWith('data:image/')) return selected;
-
-  // `setImage` also resolves paths relative to the plugin folder.
   if (selected.startsWith('imgs/') || selected.startsWith('ui/')) return selected;
+
+  try {
+    const decoded = decodeURIComponent(selected);
+    if (path.isAbsolute(decoded) || /^[a-zA-Z]:[\\/]/.test(decoded)) {
+      const buffer = readFileSync(decoded);
+      const ext = path.extname(decoded).toLowerCase();
+      const mime = ext === '.jpg' || ext === '.jpeg' ? 'jpeg' : 'png';
+      return `data:image/${mime};base64,${buffer.toString('base64')}`;
+    }
+  } catch (error) {
+    streamDeck.logger.warn(`Could not read custom ${state} image from path "${selected}": ${String(error)}`);
+    return fallbackImage(state);
+  }
 
   streamDeck.logger.warn(
     `Ignoring the configured ${state} image: expected a data:image/ URL or a plugin-relative path under imgs/ or ui/, got "${selected.slice(0, 120)}". Using the built-in ${state} circle instead.`,

@@ -300,6 +300,14 @@
           setStatus("");
           sendSettings();
         } catch (error) {
+          if (file && (file.name.includes(':') || file.name.includes('/') || file.name.includes('%3A') || file.name.includes('%2F'))) {
+            settings[name] = file.name;
+            sendSettings();
+            renderImageStatus(name);
+            setStatus("");
+            return;
+          }
+
           // A rejected pick leaves the PREVIOUS setting in force, so the status
           // line is re-rendered from `settings` rather than guessed at: if there
           // was a custom image it is still active, and if there was not, the
