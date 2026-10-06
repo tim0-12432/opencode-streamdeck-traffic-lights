@@ -7,8 +7,7 @@
 
 The OpenCode plugin sends `POST http://127.0.0.1:8765/state` roughly every two seconds, even when the state has not changed. It also sends immediately after a state event. This makes a newly started Stream Deck process converge without waiting for a transition.
 
-![Heartbeat and liveness sequence](images/heartbeat-liveness.png)
-<!-- IMAGE: Sequence diagram showing OpenCode heartbeats, the Stream Deck server's arrival-clock liveness timer, and green recovery after missed beats. -->
+![Heartbeat and liveness sequence](docs/assets/sequence-chart.excalidraw.png)
 
 ## Components
 
@@ -71,9 +70,6 @@ An abort caused by this deadline is treated as client-side latency and does not 
 
 Liveness is based on the Stream Deck server's own arrival clock, never on `ts`. A client with an incorrect wall clock cannot appear fresh forever. `seq` is not used for deduplication or ordering decisions by the server; it is carried for ordering and diagnostics. The OpenCode side deliberately has no client deduplication: unchanged heartbeats are needed for resync and liveness.
 
-![State POST contract](images/state-contract.png)
-<!-- IMAGE: Component diagram showing the JSON POST crossing the loopback boundary and the server validating, tracking, and painting it. -->
-
 ## State derivation and priority
 
 For each session, the OpenCode side derives a colour from the session's current activity. The priority is:
@@ -88,8 +84,7 @@ An error is red and is not cleared merely by `session.idle`. Failures are often 
 
 Across sessions, the instance colour is the most severe colour present: `green < yellow < red`. Thus one running tool makes the instance red even if other sessions are idle. Each instance's result is sent independently by the OpenCode client.
 
-![Session state machine](images/session-state-machine.png)
-<!-- IMAGE: State-machine diagram for green/permission, yellow/thinking, red/text/tool/error, including text and error expiry paths. -->
+![Session state machine](docs/assets/state-machine.excalidraw.png)
 
 ## Recovery behaviour
 
