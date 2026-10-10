@@ -85,7 +85,7 @@ The plugin ID changed, so existing keys need to be re-added and their **Instance
 
 The OpenCode plugin sends its current state to a small local server inside the Stream Deck plugin every 2 seconds. That server listens on `127.0.0.1` only, so it is never reachable from the network.
 
-For the wire contract, timing rules, and recovery behaviour, see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
+For the wire contract, timing rules, and recovery behaviour, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Development
 

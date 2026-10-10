@@ -1,5 +1,7 @@
 # Architecture
 
+For a general overview, see [README.md](README.md). For development and build details, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 `opencode-streamdeck-traffic-lights` has two independently running halves joined by a small loopback HTTP protocol:
 
 - The OpenCode plugin observes session events, derives one colour per session, reduces those colours across sessions, and sends state for its instance.

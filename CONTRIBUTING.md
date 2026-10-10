@@ -1,5 +1,7 @@
 # Contributing
 
+For a general overview, see [README.md](README.md). For technical details on the protocol and components, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 This repository is `opencode-streamdeck-traffic-lights`. It is a pnpm workspace with an OpenCode plugin, a Stream Deck plugin, and one shared protocol module.
 
 ## Prerequisites
